@@ -6,7 +6,6 @@
 
 [![Deepgram](https://img.shields.io/badge/Deepgram-STT%2FTTS-blue)]()
 [![Claude](https://img.shields.io/badge/Anthropic-Claude%20API-orange)]()
-[![Redis](https://img.shields.io/badge/Redis-Agent%20Memory-red)]()
 [![Agent S](https://img.shields.io/badge/Simular-Agent%20S-purple)]()
 
 ---
