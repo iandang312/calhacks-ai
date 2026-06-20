@@ -1,4 +1,4 @@
-# IntentBridge 🎙️
+# EchoMind 🎙️
 
 ### Voice Intent Engine for People with Speech Disorders
 
