@@ -1,0 +1,6 @@
+agentspan
+uiautomator2
+python-dotenv
+fastapi
+uvicorn[standard]
+pytest
