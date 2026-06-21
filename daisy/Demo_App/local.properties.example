@@ -1,0 +1,12 @@
+# Copy this file to `local.properties` and fill in your keys.
+# Android Studio also writes `sdk.dir` here automatically — keep that line if present.
+# local.properties is gitignored, so your keys stay out of version control.
+
+# Deepgram streaming speech-to-text (https://console.deepgram.com)
+DEEPGRAM_API_KEY=your_deepgram_api_key_here
+
+# ElevenLabs lifelike text-to-speech (https://elevenlabs.io)
+ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+
+# Optional: ElevenLabs voice id. Defaults to "Rachel" (21m00Tcm4TlvDq8ikWAM) if unset.
+ELEVENLABS_VOICE_ID=
