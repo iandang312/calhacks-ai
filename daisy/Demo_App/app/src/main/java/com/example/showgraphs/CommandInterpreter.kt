@@ -183,8 +183,10 @@ object CommandInterpreter {
     }
 
     fun isWakePhrase(text: String): Boolean {
-        val normalized = text.lowercase()
-        return normalized.contains("hi daisy") || normalized.contains("hi, daisy")
+        // Strip punctuation and collapse whitespace so a phrase Deepgram splits
+        // into segments ("Hi." + "Daisy.") still matches once recombined.
+        val normalized = text.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+        return normalized.contains("hi daisy")
     }
 
     fun isAffirmative(text: String): Boolean {

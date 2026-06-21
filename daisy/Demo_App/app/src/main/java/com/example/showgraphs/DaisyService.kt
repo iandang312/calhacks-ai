@@ -113,6 +113,10 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     override fun hideOverlay() = removeOverlay()
 
     override fun leaveApp() {
+        // Prefer the accessibility Home action — it reliably reaches the launcher
+        // from a background service. Fall back to a HOME intent if the
+        // accessibility service isn't connected yet.
+        if (DaisyAccessibilityService.home()) return
         startActivity(
             Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)

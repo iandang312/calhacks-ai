@@ -16,6 +16,12 @@ class ConversationEngine(
     private var phase = Phase.STANDBY
     private var pendingCommand: ParsedCommand? = null
 
+    // Rolling buffer of recent speech while in STANDBY. Deepgram often finalizes
+    // "Hi Daisy" as two segments ("Hi." then "Daisy."); buffering recent finals
+    // lets the recombined text trigger the wake phrase.
+    private val wakeBuffer = StringBuilder()
+    private var lastWakeInputAt = 0L
+
     private enum class Phase {
         STANDBY,
         GREETING,
@@ -26,7 +32,7 @@ class ConversationEngine(
 
     fun onPartialSpeech(text: String) {
         when (phase) {
-            Phase.STANDBY -> if (CommandInterpreter.isWakePhrase(text)) onWake()
+            Phase.STANDBY -> if (heardWake(text, isFinal = false)) onWake()
             Phase.GREETING, Phase.LISTENING, Phase.CONFIRMING -> {
                 if (CommandInterpreter.isGoodbye(text)) endSession()
             }
@@ -38,7 +44,7 @@ class ConversationEngine(
         Log.i(TAG, "heard: $text phase=$phase")
         when (phase) {
             Phase.STANDBY -> {
-                if (CommandInterpreter.isWakePhrase(text)) onWake()
+                if (heardWake(text, isFinal = true)) onWake()
             }
             Phase.GREETING -> Unit
             Phase.LISTENING -> onCommand(text)
@@ -51,6 +57,33 @@ class ConversationEngine(
         if (phase == Phase.LISTENING || phase == Phase.CONFIRMING) {
             callbacks.speak("Didn't catch that, can you say it again?")
         }
+    }
+
+    /**
+     * Tests whether the wake phrase has been heard, tolerating Deepgram
+     * splitting it across segments. The current fragment is checked against the
+     * recent buffer without committing partials (so interim results don't
+     * pollute it); only finalized fragments are retained for the next segment.
+     * The buffer resets after [WAKE_BUFFER_WINDOW_MS] of silence.
+     */
+    private fun heardWake(text: String, isFinal: Boolean): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastWakeInputAt > WAKE_BUFFER_WINDOW_MS) wakeBuffer.setLength(0)
+        lastWakeInputAt = now
+
+        val candidate = if (wakeBuffer.isEmpty()) text else "$wakeBuffer $text"
+        if (CommandInterpreter.isWakePhrase(candidate)) {
+            wakeBuffer.setLength(0)
+            return true
+        }
+        if (isFinal) {
+            if (wakeBuffer.isNotEmpty()) wakeBuffer.append(' ')
+            wakeBuffer.append(text)
+            if (wakeBuffer.length > WAKE_BUFFER_MAX) {
+                wakeBuffer.delete(0, wakeBuffer.length - WAKE_BUFFER_MAX)
+            }
+        }
+        return false
     }
 
     fun onWake() {
@@ -119,6 +152,8 @@ class ConversationEngine(
     private fun endSession() {
         pendingCommand = null
         phase = Phase.STANDBY
+        wakeBuffer.setLength(0)
+        lastWakeInputAt = 0L
         callbacks.hideOverlay()
     }
 
@@ -134,5 +169,11 @@ class ConversationEngine(
 
     companion object {
         private const val TAG = "DAISY_CONV"
+
+        /** Reset the wake buffer after this much silence between fragments. */
+        private const val WAKE_BUFFER_WINDOW_MS = 4000L
+
+        /** Cap the wake buffer so old speech can't accumulate unbounded. */
+        private const val WAKE_BUFFER_MAX = 64
     }
 }
