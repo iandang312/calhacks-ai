@@ -1,12 +1,12 @@
-# EchoMind 🎙️
+# daisy 🎙️
 
 ### Voice Intent Engine for People with Speech Disorders
 
 > Siri understands your words. We understand *you* — even when the words don't come out right.
 
-[![Deepgram](https://img.shields.io/badge/Deepgram-STT%2FTTS-blue)]()
-[![Claude](https://img.shields.io/badge/Anthropic-Claude%20API-orange)]()
-[![Agent S](https://img.shields.io/badge/Simular-Agent%20S-purple)]()
+![Deepgram](https://img.shields.io/badge/Deepgram-STT%2FTTS-blue)
+![Claude](https://img.shields.io/badge/Anthropic-Claude%20API-orange)
+![Agent S](https://img.shields.io/badge/Simular-Agent%20S-purple)
 
 ---
 
@@ -14,7 +14,7 @@
 
 Most voice assistants are built for fluent, structured speech.
 
-For many people with speech disorders, dementia, aphasia, stutters, or other communication-related conditions, speech can include repeated sounds, interrupted phrases, incomplete sentences, or unclear wording.
+For many people with speech disorders, aphasia, stutters, or other communication-related conditions, speech can include repeated sounds, interrupted phrases, incomplete sentences, or unclear wording.
 
 For example:
 
@@ -22,27 +22,28 @@ For example:
 
 A traditional assistant may struggle to understand this reliably.
 
-EchoMind is designed to recover the user's true intent from fragmented or disfluent speech and turn it into a clear, actionable plan.
+daisy is designed to recover the user's true intent from fragmented or disfluent speech and turn it into a clear, actionable plan.
 
 ---
 
 ## Our Solution
 
-EchoMind is an accessibility-focused Android AI agent layer that listens after a wake word, reconstructs the user's intended request, explains the plan back to them, and then carries out the action inside a real Android app.
+daisy is an accessibility-focused Android AI agent layer that listens after a wake word, reconstructs the user's intended request, explains the plan back to them, and then carries out the action inside a real Android app.
 
-Instead of forcing users to speak like machines, EchoMind adapts to how the user naturally communicates.
+Instead of forcing users to speak like machines, daisy adapts to how the user naturally communicates.
 
 ---
 
 ## How It Works
 
 1. The user says a wake word.
-2. EchoMind begins listening.
+2. daisy begins listening.
 3. Deepgram transcribes the user's speech.
-4. Claude interprets the transcript and reconstructs the user's true intent.
-5. EchoMind explains the interpreted intent and planned action back to the user.
-6. The user confirms the action.
-7. Agent S and the Android Accessibility API execute the task inside a real Android app.
+4. The transcript is redacted for personal information (PII).
+5. Claude interprets the transcript and reconstructs the user's true intent.
+6. daisy explains the interpreted intent and planned action back to the user.
+7. The user confirms the action.
+8. Simular Agent S and the Android Accessibility API execute the task inside a real Android app.
 
 ---
 
@@ -52,11 +53,11 @@ User says:
 
 > "I w-w-wan-t a bur-bur-ger"
 
-EchoMind interprets:
+daisy interprets:
 
 > "The user wants to order a burger."
 
-EchoMind responds:
+daisy responds:
 
 > "I think you want to order a burger. I will open the app, search for burger options, and ask you to confirm before placing anything."
 
@@ -66,25 +67,27 @@ Then the Android agent begins executing the task.
 
 ## Architecture
 
-```text
-Wake Word
-   ↓
-Voice Input
-   ↓
-Deepgram Speech-to-Text
-   ↓
-Claude Intent Reconstruction
-   ↓
-Intent + Plan Generation
-   ↓
-User Confirmation
-   ↓
-Agent S
-   ↓
-Android Accessibility API
-   ↓
-Real Android App Action
+    Wake Word
+       ↓
+    Voice Input
+       ↓
+    Deepgram Speech-to-Text
+       ↓
+    PII Redaction (spaCy)
+       ↓
+    Claude Intent Reconstruction
+       ↓
+    Intent + Plan Generation
+       ↓
+    User Confirmation
+       ↓
+    Simular Agent S
+       ↓
+    Android Accessibility API
+       ↓
+    Real Android App Action
 
+---
 
 ## Setup
 
@@ -98,8 +101,7 @@ source .venv/bin/activate          # macOS / Linux
 # .venv\Scripts\activate           # Windows PowerShell
 ```
 
-You should see `(.venv)` in your prompt. Every command below assumes the
-venv is active.
+You should see `(.venv)` in your prompt. Every command below assumes the venv is active.
 
 ### 2. Install packages
 
@@ -120,17 +122,13 @@ python -c "import agentspan, uiautomator2, fastapi, dotenv; print('ok')"
 cp .env.example .env
 ```
 
-Edit `.env` and fill in:
-
-- `GEMINI_API_KEY=...`
-- `GOOGLE_CLOUD_PROJECT=...`
+Edit `.env` and fill in the required keys (see `.env.example` for the full list).
 
 `.env` is gitignored.
 
 ### 4. Download the spaCy NLP model (one-time)
 
-The PII protection service uses spaCy's large English model for named-entity
-recognition (person names, locations, organisations):
+The PII protection service uses spaCy's large English model for named-entity recognition (person names, locations, organisations):
 
 ```bash
 python -m spacy download en_core_web_lg
@@ -142,23 +140,24 @@ Verify:
 python -c "import spacy; spacy.load('en_core_web_lg'); print('ok')"
 ```
 
-### 5. Prepare the Android emulator (one-time per device)
+### 5. Prepare the Android device (one-time per device)
 
-1. Launch a Samsung-style AVD from Android Studio
-   (<https://developer.android.com/studio>).
+1. Launch an Android device/emulator (https://developer.android.com/studio).
 2. Confirm `adb` sees it:
-   ```bash
-   adb devices
-   ```
+
+```bash
+adb devices
+```
+
 3. Push the on-device `atx-agent` that `uiautomator2` needs:
-   ```bash
-   python -m uiautomator2 init
-   ```
 
-### 6. Start the agentspan server
+```bash
+python -m uiautomator2 init
+```
 
-The agent runtime requires the agentspan server running locally. This script
-loads credentials from `.env` into the server's store and starts it:
+### 6. Start the agent server
+
+The agent runtime requires its server running locally. This script loads credentials from `.env` into the server's store and starts it:
 
 ```bash
 # First time only — make the script executable
@@ -168,26 +167,30 @@ chmod +x scripts/start_server.sh
 ./scripts/start_server.sh
 ```
 
-The server starts on `http://localhost:6767`. Keep this terminal open — the
-server must stay running whenever you use the agent or run LLM tests.
+The server starts on `http://localhost:6767`. Keep this terminal open — the server must stay running whenever you use the agent or run LLM tests.
+
+---
 
 ## Run
 
 Three processes need to run in separate terminals. Open them in order:
 
-**Terminal 1 — agentspan server** (keep running):
+**Terminal 1 — agent server** (keep running):
+
 ```bash
 source .venv/bin/activate
 ./scripts/start_server.sh
 ```
 
 **Terminal 2 — Python HTTP service** (for the Java side, keep running):
+
 ```bash
 source .venv/bin/activate
 uvicorn agent.server:app --host 0.0.0.0 --port 8000
 ```
 
 **Terminal 3 — send a task** (one-shot CLI or tests):
+
 ```bash
 source .venv/bin/activate
 
@@ -200,26 +203,51 @@ curl -X POST http://localhost:8000/agent/run \
      -d '{"task": "open the settings app"}'
 ```
 
+---
+
 ## Test
 
-**Terminal 3** (agentspan server must be running in Terminal 1):
+**Terminal 3** (agent server must be running in Terminal 1):
 
 Unit tests — no emulator, no LLM:
+
 ```bash
 pytest tests/test_agent_loop.py -q
 ```
 
 PII protection tests — no emulator, spaCy model required:
+
 ```bash
 pytest tests/services/test_pii_redactor.py -v -s
 ```
 
-LLM integration tests — agentspan server required:
+LLM integration tests — agent server required:
+
 ```bash
 RUN_LLM_TESTS=1 pytest tests/test_agentspan_node.py -v
 ```
 
 Device integration tests — emulator required:
+
 ```bash
 RUN_DEVICE_TESTS=1 pytest tests/test_actions.py -q
 ```
+
+---
+
+## Built With
+
+- **Python** — backend services and agent runtime
+- **Kotlin / Java** — Android app and accessibility integration
+- **Deepgram** — speech-to-text and text-to-speech
+- **Claude** — intent reconstruction from disfluent speech
+- **Simular Agent S** — app interaction planning and execution
+- **Android Accessibility Service / uiautomator2** — on-device screen reading and action execution
+- **spaCy** — PII redaction via named-entity recognition
+- **FastAPI** — Python HTTP service
+
+---
+
+## Team
+
+Built at the UC Berkeley AI Hackathon 2026.
