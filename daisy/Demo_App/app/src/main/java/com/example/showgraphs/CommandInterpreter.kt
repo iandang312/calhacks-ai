@@ -183,8 +183,11 @@ object CommandInterpreter {
     }
 
     fun isWakePhrase(text: String): Boolean {
-        val normalized = text.lowercase()
-        return normalized.contains("hi daisy") || normalized.contains("hi, daisy")
+        // "daisy" is the distinctive wake token. The "hi"/"hey" prefix is often
+        // misheard (e.g. "I", "I gave you") or dropped, so match the name itself.
+        // Punctuation is stripped so split segments ("Hi." + "Daisy.") still match.
+        val normalized = text.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
+        return normalized.contains("daisy")
     }
 
     fun isAffirmative(text: String): Boolean {

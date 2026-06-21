@@ -84,6 +84,17 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
         voiceAssistant.start()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Re-delivered when MainActivity is re-opened (it calls startForegroundService
+        // again). If capture stalled while we were backgrounded — e.g. the mic was
+        // taken by the Assistant — restart the pipeline so the next wake works.
+        if (::voiceAssistant.isInitialized && !voiceAssistant.isHealthy()) {
+            android.util.Log.w("DAISY_VOICE", "Capture unhealthy on re-entry; restarting")
+            voiceAssistant.restart()
+        }
+        return START_STICKY
+    }
+
     override fun onDestroy() {
         voiceAssistant.destroy()
         tts?.shutdown()
@@ -113,6 +124,10 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     override fun hideOverlay() = removeOverlay()
 
     override fun leaveApp() {
+        // Prefer the accessibility Home action — it reliably reaches the launcher
+        // from a background service. Fall back to a HOME intent if the
+        // accessibility service isn't connected yet.
+        if (DaisyAccessibilityService.home()) return
         startActivity(
             Intent(Intent.ACTION_MAIN).apply {
                 addCategory(Intent.CATEGORY_HOME)

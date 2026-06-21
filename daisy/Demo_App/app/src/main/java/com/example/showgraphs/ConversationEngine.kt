@@ -16,6 +16,12 @@ class ConversationEngine(
     private var phase = Phase.STANDBY
     private var pendingCommand: ParsedCommand? = null
 
+    // Rolling buffer of recent speech while in STANDBY. Deepgram often finalizes
+    // "Hi Daisy" as two segments ("Hi." then "Daisy."); buffering recent finals
+    // lets the recombined text trigger the wake phrase.
+    private val wakeBuffer = StringBuilder()
+    private var lastWakeInputAt = 0L
+
     private enum class Phase {
         STANDBY,
         GREETING,
@@ -25,21 +31,30 @@ class ConversationEngine(
     }
 
     fun onPartialSpeech(text: String) {
+        // The wake phrase is idempotent: it (re)starts a session from any phase,
+        // so every "Hi Daisy" behaves the same. It is only ignored while the
+        // greeting is mid-playback, so the interim + final of one utterance don't
+        // double-trigger.
+        if (phase != Phase.GREETING && heardWake(text, isFinal = false)) {
+            onWake()
+            return
+        }
         when (phase) {
-            Phase.STANDBY -> if (CommandInterpreter.isWakePhrase(text)) onWake()
             Phase.GREETING, Phase.LISTENING, Phase.CONFIRMING -> {
                 if (CommandInterpreter.isGoodbye(text)) endSession()
             }
-            Phase.EXECUTING -> Unit
+            Phase.STANDBY, Phase.EXECUTING -> Unit
         }
     }
 
     fun onFinalSpeech(text: String) {
         Log.i(TAG, "heard: $text phase=$phase")
+        if (phase != Phase.GREETING && heardWake(text, isFinal = true)) {
+            onWake()
+            return
+        }
         when (phase) {
-            Phase.STANDBY -> {
-                if (CommandInterpreter.isWakePhrase(text)) onWake()
-            }
+            Phase.STANDBY -> Unit
             Phase.GREETING -> Unit
             Phase.LISTENING -> onCommand(text)
             Phase.CONFIRMING -> onConfirmation(text)
@@ -53,8 +68,37 @@ class ConversationEngine(
         }
     }
 
+    /**
+     * Tests whether the wake phrase has been heard, tolerating Deepgram
+     * splitting it across segments. The current fragment is checked against the
+     * recent buffer without committing partials (so interim results don't
+     * pollute it); only finalized fragments are retained for the next segment.
+     * The buffer resets after [WAKE_BUFFER_WINDOW_MS] of silence.
+     */
+    private fun heardWake(text: String, isFinal: Boolean): Boolean {
+        val now = System.currentTimeMillis()
+        if (now - lastWakeInputAt > WAKE_BUFFER_WINDOW_MS) wakeBuffer.setLength(0)
+        lastWakeInputAt = now
+
+        val candidate = if (wakeBuffer.isEmpty()) text else "$wakeBuffer $text"
+        if (CommandInterpreter.isWakePhrase(candidate)) {
+            wakeBuffer.setLength(0)
+            return true
+        }
+        if (isFinal) {
+            if (wakeBuffer.isNotEmpty()) wakeBuffer.append(' ')
+            wakeBuffer.append(text)
+            if (wakeBuffer.length > WAKE_BUFFER_MAX) {
+                wakeBuffer.delete(0, wakeBuffer.length - WAKE_BUFFER_MAX)
+            }
+        }
+        return false
+    }
+
     fun onWake() {
-        if (phase != Phase.STANDBY) return
+        // Idempotent: restart cleanly regardless of the current phase. Drop any
+        // pending command, go home, greet, then listen.
+        pendingCommand = null
         phase = Phase.GREETING
         callbacks.showOverlay(DaisyState.AWAKE)
         callbacks.leaveApp()
@@ -119,6 +163,8 @@ class ConversationEngine(
     private fun endSession() {
         pendingCommand = null
         phase = Phase.STANDBY
+        wakeBuffer.setLength(0)
+        lastWakeInputAt = 0L
         callbacks.hideOverlay()
     }
 
@@ -134,5 +180,11 @@ class ConversationEngine(
 
     companion object {
         private const val TAG = "DAISY_CONV"
+
+        /** Reset the wake buffer after this much silence between fragments. */
+        private const val WAKE_BUFFER_WINDOW_MS = 4000L
+
+        /** Cap the wake buffer so old speech can't accumulate unbounded. */
+        private const val WAKE_BUFFER_MAX = 64
     }
 }
