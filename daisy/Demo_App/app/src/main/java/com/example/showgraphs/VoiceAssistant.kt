@@ -100,6 +100,15 @@ class VoiceAssistant(
         stop()
     }
 
+    /** True if we are listening and the recorder is actively capturing. */
+    fun isHealthy(): Boolean = active && audioStreamer?.isCapturing() == true
+
+    /** Tears down and restarts capture + the STT stream (e.g. after a stall). */
+    fun restart() {
+        stop()   // clears `active` so the following start() isn't a no-op
+        start()
+    }
+
     /** Opens (or replaces) the Deepgram client. Audio capture keeps running. */
     private fun openClient() {
         // Bump the generation first so the outgoing client's close/error

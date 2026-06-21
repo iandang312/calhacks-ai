@@ -183,10 +183,11 @@ object CommandInterpreter {
     }
 
     fun isWakePhrase(text: String): Boolean {
-        // Strip punctuation and collapse whitespace so a phrase Deepgram splits
-        // into segments ("Hi." + "Daisy.") still matches once recombined.
+        // "daisy" is the distinctive wake token. The "hi"/"hey" prefix is often
+        // misheard (e.g. "I", "I gave you") or dropped, so match the name itself.
+        // Punctuation is stripped so split segments ("Hi." + "Daisy.") still match.
         val normalized = text.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
-        return normalized.contains("hi daisy")
+        return normalized.contains("daisy")
     }
 
     fun isAffirmative(text: String): Boolean {

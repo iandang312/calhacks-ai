@@ -31,21 +31,30 @@ class ConversationEngine(
     }
 
     fun onPartialSpeech(text: String) {
+        // The wake phrase is idempotent: it (re)starts a session from any phase,
+        // so every "Hi Daisy" behaves the same. It is only ignored while the
+        // greeting is mid-playback, so the interim + final of one utterance don't
+        // double-trigger.
+        if (phase != Phase.GREETING && heardWake(text, isFinal = false)) {
+            onWake()
+            return
+        }
         when (phase) {
-            Phase.STANDBY -> if (heardWake(text, isFinal = false)) onWake()
             Phase.GREETING, Phase.LISTENING, Phase.CONFIRMING -> {
                 if (CommandInterpreter.isGoodbye(text)) endSession()
             }
-            Phase.EXECUTING -> Unit
+            Phase.STANDBY, Phase.EXECUTING -> Unit
         }
     }
 
     fun onFinalSpeech(text: String) {
         Log.i(TAG, "heard: $text phase=$phase")
+        if (phase != Phase.GREETING && heardWake(text, isFinal = true)) {
+            onWake()
+            return
+        }
         when (phase) {
-            Phase.STANDBY -> {
-                if (heardWake(text, isFinal = true)) onWake()
-            }
+            Phase.STANDBY -> Unit
             Phase.GREETING -> Unit
             Phase.LISTENING -> onCommand(text)
             Phase.CONFIRMING -> onConfirmation(text)
@@ -87,7 +96,9 @@ class ConversationEngine(
     }
 
     fun onWake() {
-        if (phase != Phase.STANDBY) return
+        // Idempotent: restart cleanly regardless of the current phase. Drop any
+        // pending command, go home, greet, then listen.
+        pendingCommand = null
         phase = Phase.GREETING
         callbacks.showOverlay(DaisyState.AWAKE)
         callbacks.leaveApp()
