@@ -84,3 +84,122 @@ Agent S
 Android Accessibility API
    ↓
 Real Android App Action
+
+
+## Setup
+
+### 1. Create a virtual environment
+
+From the repo root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # macOS / Linux
+# .venv\Scripts\activate           # Windows PowerShell
+```
+
+You should see `(.venv)` in your prompt. Every command below assumes the
+venv is active.
+
+### 2. Install packages
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Verify:
+
+```bash
+python -c "import agentspan, uiautomator2, fastapi, dotenv; print('ok')"
+```
+
+### 3. Configure environment variables
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in:
+
+- `GEMINI_API_KEY=...`
+- `GOOGLE_CLOUD_PROJECT=...`
+
+`.env` is gitignored.
+
+### 4. Prepare the Android emulator (one-time per device)
+
+1. Launch a Samsung-style AVD from Android Studio
+   (<https://developer.android.com/studio>).
+2. Confirm `adb` sees it:
+   ```bash
+   adb devices
+   ```
+3. Push the on-device `atx-agent` that `uiautomator2` needs:
+   ```bash
+   python -m uiautomator2 init
+   ```
+
+### 5. Start the agentspan server
+
+The agent runtime requires the agentspan server running locally. This script
+loads credentials from `.env` into the server's store and starts it:
+
+```bash
+# First time only — make the script executable
+chmod +x scripts/start_server.sh
+
+# Every time — run from the repo root in a dedicated terminal
+./scripts/start_server.sh
+```
+
+The server starts on `http://localhost:6767`. Keep this terminal open — the
+server must stay running whenever you use the agent or run LLM tests.
+
+## Run
+
+Three processes need to run in separate terminals. Open them in order:
+
+**Terminal 1 — agentspan server** (keep running):
+```bash
+source .venv/bin/activate
+./scripts/start_server.sh
+```
+
+**Terminal 2 — Python HTTP service** (for the Java side, keep running):
+```bash
+source .venv/bin/activate
+uvicorn agent.server:app --host 0.0.0.0 --port 8000
+```
+
+**Terminal 3 — send a task** (one-shot CLI or tests):
+```bash
+source .venv/bin/activate
+
+# Single task via CLI
+python -m agent.run "open the settings app"
+
+# Or POST to the HTTP service directly
+curl -X POST http://localhost:8000/agent/run \
+     -H "Content-Type: application/json" \
+     -d '{"task": "open the settings app"}'
+```
+
+## Test
+
+**Terminal 3** (agentspan server must be running in Terminal 1):
+
+Unit tests — no emulator, no LLM:
+```bash
+pytest tests/test_agent_loop.py -q
+```
+
+LLM integration tests — agentspan server required:
+```bash
+RUN_LLM_TESTS=1 pytest tests/test_agentspan_node.py -v
+```
+
+Device integration tests — emulator required:
+```bash
+RUN_DEVICE_TESTS=1 pytest tests/test_actions.py -q
+```
