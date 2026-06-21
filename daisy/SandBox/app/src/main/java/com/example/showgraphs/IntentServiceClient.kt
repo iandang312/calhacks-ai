@@ -25,17 +25,29 @@ import java.util.concurrent.TimeUnit
  *
  * Async, OkHttp-backed; callbacks fire on the main thread. Mirrors the request
  * pattern used by [com.example.showgraphs.voice.tts.DeepgramTts].
+ *
+ * Talks to two backends: the intent service ([infer], `POST {baseUrl}/infer`) and
+ * the agent execution service ([runAgent], `POST {agentBaseUrl}/agent/run`), which
+ * drives the device with the plan the intent service produced.
  */
 class IntentServiceClient(
     baseUrl: String,
+    agentBaseUrl: String,
 ) {
     private val inferUrl = baseUrl.trimEnd('/') + "/infer"
+    private val agentUrl = agentBaseUrl.trimEnd('/') + "/agent/run"
     private val mainHandler = Handler(Looper.getMainLooper())
     private val client = OkHttpClient.Builder()
         .callTimeout(30, TimeUnit.SECONDS)
         .build()
+    // The agent drives the device over many UI steps, so it needs far more
+    // headroom than the snappy /infer call.
+    private val agentClient = OkHttpClient.Builder()
+        .callTimeout(5, TimeUnit.MINUTES)
+        .build()
 
     private var pendingCall: Call? = null
+    private var pendingAgentCall: Call? = null
 
     val isConfigured: Boolean get() = inferUrl.startsWith("http")
 
@@ -93,10 +105,57 @@ class IntentServiceClient(
         })
     }
 
-    /** Cancel any in-flight request (e.g. the session ended). */
+    /**
+     * POST [plan] to /agent/run as the task to execute on the device. This is the
+     * same string [infer] returned — natural-language UI steps the agent follows.
+     *
+     * Fire-and-forget from the caller's side: the agent runs on the device while
+     * Daisy speaks the plan. [onError] fires on the main thread if the agent can't
+     * be reached or returns an error; a successful run is logged. Starting a new
+     * run cancels any in-flight one.
+     */
+    fun runAgent(
+        plan: String,
+        onError: (String) -> Unit = {},
+    ) {
+        pendingAgentCall?.cancel()
+
+        val body = JSONObject().put("task", plan).toString().toRequestBody(JSON)
+        val request = Request.Builder()
+            .url(agentUrl)
+            .post(body)
+            .build()
+
+        val call = agentClient.newCall(request)
+        pendingAgentCall = call
+        Log.i(TAG, "runAgent -> $agentUrl : $plan")
+        call.enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (call.isCanceled()) return
+                Log.e(TAG, "agent request failed: ${e.message}", e)
+                mainHandler.post { onError("I couldn't reach the agent service.") }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    val bodyText = it.body?.string().orEmpty()
+                    if (!it.isSuccessful) {
+                        Log.e(TAG, "agent HTTP ${it.code}: $bodyText")
+                        mainHandler.post { onError("The agent service had a problem.") }
+                        return
+                    }
+                    Log.i(TAG, "agent done <- $bodyText")
+                }
+            }
+        })
+    }
+
+    /** Cancel any in-flight requests (e.g. the session ended). */
     fun cancel() {
         pendingCall?.cancel()
         pendingCall = null
+        pendingAgentCall?.cancel()
+        pendingAgentCall = null
     }
 
     companion object {

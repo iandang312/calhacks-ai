@@ -88,7 +88,10 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
             BuildConfig.DEEPGRAM_TTS_MODEL,
         )
 
-        intentClient = IntentServiceClient(BuildConfig.INTENT_SERVICE_URL)
+        intentClient = IntentServiceClient(
+            BuildConfig.INTENT_SERVICE_URL,
+            BuildConfig.AGENT_SERVICE_URL,
+        )
 
         conversationEngine = ConversationEngine(this)
         voiceAssistant = VoiceAssistant(this, this)
@@ -232,6 +235,10 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
 
     override fun cancelIntent() {
         if (::intentClient.isInitialized) intentClient.cancel()
+    }
+
+    override fun runOnAgent(plan: String) {
+        intentClient.runAgent(plan)
     }
 
     override fun onPartialSpeech(text: String) {

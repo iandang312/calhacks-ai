@@ -43,6 +43,12 @@ android {
         // emulator the host machine is 10.0.2.2; override for a physical device.
         val intentUrl = localProps.getProperty("INTENT_SERVICE_URL", "").ifBlank { "http://10.0.2.2:8000" }
         buildConfigField("String", "INTENT_SERVICE_URL", "\"$intentUrl\"")
+
+        // Base URL of the agent execution service (agent/server.py) that drives the
+        // device. The inferred plan is POSTed here as the task. Defaults to port
+        // 8001 since the intent service owns 8000 on the same host.
+        val agentUrl = localProps.getProperty("AGENT_SERVICE_URL", "").ifBlank { "http://10.0.2.2:8001" }
+        buildConfigField("String", "AGENT_SERVICE_URL", "\"$agentUrl\"")
     }
 
     buildFeatures {

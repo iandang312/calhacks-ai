@@ -27,6 +27,12 @@ class ConversationEngine(
 
         /** Cancel any in-flight intent request (the session is ending). */
         fun cancelIntent()
+
+        /**
+         * Hand the inferred [plan] to the agent execution service to drive the
+         * device. Fire-and-forget; runs while Daisy speaks the same plan back.
+         */
+        fun runOnAgent(plan: String)
     }
 
     private var phase = Phase.STANDBY
@@ -207,6 +213,9 @@ class ConversationEngine(
         // Drop a late response if the session moved on (ended, or re-woken) while
         // the request was in flight.
         if (phase != Phase.EXECUTING) return
+        // Kick off the agent to actually perform the plan on the device, then speak
+        // the same plan back so the user hears it while it runs.
+        callbacks.runOnAgent(plan)
         callbacks.speak(plan) { returnToListening() }
     }
 
