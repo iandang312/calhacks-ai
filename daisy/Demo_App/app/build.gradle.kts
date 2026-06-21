@@ -35,6 +35,16 @@ android {
             "DEEPGRAM_API_KEY",
             "\"${localProps.getProperty("DEEPGRAM_API_KEY", "")}\"",
         )
+        buildConfigField(
+            "String",
+            "ELEVENLABS_API_KEY",
+            "\"${localProps.getProperty("ELEVENLABS_API_KEY", "")}\"",
+        )
+        buildConfigField(
+            "String",
+            "ELEVENLABS_VOICE_ID",
+            "\"${localProps.getProperty("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")}\"",
+        )
     }
 
     buildFeatures {
@@ -50,6 +60,12 @@ android {
             )
         }
     }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -68,6 +84,7 @@ dependencies {
     // OkHttp provides the WebSocket used for Deepgram real-time streaming STT.
     implementation(libs.okhttp)
     testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 

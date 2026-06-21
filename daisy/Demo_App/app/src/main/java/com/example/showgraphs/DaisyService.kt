@@ -5,16 +5,21 @@ import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
+import com.example.showgraphs.voice.tts.ElevenLabsTtsClient
+import com.example.showgraphs.voice.tts.TtsCallback
+import java.io.File
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.hypot
@@ -23,8 +28,8 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
 
     private lateinit var voiceAssistant: VoiceAssistant
     private lateinit var conversationEngine: ConversationEngine
+    private lateinit var ttsSpeaker: TtsSpeaker
     private var tts: TextToSpeech? = null
-    private var ttsReady = false
 
     private var windowManager: WindowManager? = null
     private var overlayOrb: DaisyOrbView? = null
@@ -58,29 +63,34 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
             },
         )
 
+        ttsSpeaker = TtsSpeaker()
+
         tts = TextToSpeech(this) { status ->
-            ttsReady = status == TextToSpeech.SUCCESS
-            tts?.language = Locale.US
-            tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
-                override fun onDone(utteranceId: String?) {
-                    handler.post {
-                        pendingTtsDone?.invoke()
-                        pendingTtsDone = null
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.US
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) = Unit
+                    override fun onDone(utteranceId: String?) {
+                        handler.post {
+                            pendingTtsDone?.invoke()
+                            pendingTtsDone = null
+                        }
                     }
-                }
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) {
-                    handler.post {
-                        pendingTtsDone?.invoke()
-                        pendingTtsDone = null
+                    @Deprecated("Deprecated in Java")
+                    override fun onError(utteranceId: String?) {
+                        handler.post {
+                            pendingTtsDone?.invoke()
+                            pendingTtsDone = null
+                        }
                     }
-                }
-            })
+                })
+                ttsSpeaker.setEngine(buildSpeakEngine())
+                ttsSpeaker.onReady()
+            }
         }
 
         conversationEngine = ConversationEngine(this)
-        voiceAssistant = VoiceAssistant(this, this)
+        voiceAssistant = VoiceAssistant(this)
         voiceAssistant.start()
     }
 
@@ -103,14 +113,65 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     }
 
     override fun speak(text: String, onDone: (() -> Unit)?) {
-        if (!ttsReady) {
-            onDone?.invoke()
-            return
+        ttsSpeaker.speak(text, onDone ?: {})
+    }
+
+    override fun onError(message: String) {
+        Log.e(TAG, "Voice assistant error: $message")
+        ttsSpeaker.speak(message)
+    }
+
+    private fun buildSpeakEngine(): TtsSpeaker.Engine {
+        val elevenLabsKey = BuildConfig.ELEVENLABS_API_KEY
+        val elevenLabsVoiceId = BuildConfig.ELEVENLABS_VOICE_ID
+
+        if (elevenLabsKey.isNotBlank()) {
+            val elevenLabs = ElevenLabsTtsClient(elevenLabsKey, elevenLabsVoiceId, buildAudioOutput())
+            return TtsSpeaker.Engine { text, onDone ->
+                elevenLabs.speak(text, object : TtsCallback {
+                    override fun onDone() = handler.post { onDone() }
+                    override fun onError(msg: String) {
+                        Log.w(TAG, "ElevenLabs error ($msg) — falling back to Android TTS")
+                        handler.post { androidTtsSpeak(text, onDone) }
+                    }
+                })
+            }
         }
+
+        return TtsSpeaker.Engine { text, onDone -> androidTtsSpeak(text, onDone) }
+    }
+
+    private fun androidTtsSpeak(text: String, onDone: () -> Unit) {
         pendingTtsDone = onDone
         val id = utteranceId.incrementAndGet().toString()
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
     }
+
+    private fun buildAudioOutput(): ElevenLabsTtsClient.AudioOutput =
+        ElevenLabsTtsClient.AudioOutput { audioBytes, completionCallback ->
+            try {
+                val tmpFile = File.createTempFile("daisy_tts_", ".mp3", cacheDir)
+                tmpFile.writeBytes(audioBytes)
+                val mp = MediaPlayer()
+                mp.setDataSource(tmpFile.absolutePath)
+                mp.setOnCompletionListener {
+                    it.release()
+                    tmpFile.delete()
+                    completionCallback.run()
+                }
+                mp.setOnErrorListener { it, _, _ ->
+                    it.release()
+                    tmpFile.delete()
+                    completionCallback.run()
+                    true
+                }
+                mp.prepare()
+                mp.start()
+            } catch (e: Exception) {
+                Log.e(TAG, "MediaPlayer error playing ElevenLabs audio", e)
+                completionCallback.run()
+            }
+        }
 
     override fun showOverlay(state: DaisyState) {
         if (state == DaisyState.STANDBY) {
@@ -392,6 +453,7 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     }
 
     companion object {
+        private const val TAG = "DAISY_SERVICE"
         private const val CHANNEL_ID = "daisy_service"
         private const val NOTIFICATION_ID = 1001
     }

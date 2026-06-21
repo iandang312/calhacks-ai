@@ -1,6 +1,5 @@
 package com.example.showgraphs
 
-import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -13,27 +12,33 @@ import kotlin.math.min
  * Streams microphone audio to Deepgram's real-time STT and surfaces results
  * through [Listener].
  *
- * <p>This replaces the earlier Android-native [android.speech.SpeechRecognizer]
- * implementation. The [Listener] contract is unchanged so callers
- * ([DaisyService] / [ConversationEngine]) need no changes:
- * - interim Deepgram results -> [Listener.onPartialSpeech]
- * - final Deepgram results   -> [Listener.onFinalSpeech]
- * - mic energy (computed from PCM frames) -> [Listener.onRmsChanged]
- * - a stretch of silence with no transcript -> [Listener.onNoSpeech]
+ * Audio capture is gated on [SttCallback.onOpen]: the [AudioStreamer] is
+ * created in [start] but its [AudioStreamer.start] is called only once the
+ * WebSocket handshake completes. This prevents the first ~300–500 ms of
+ * speech from being lost to a not-yet-open socket.
  *
- * <p>Deepgram callbacks arrive on OkHttp background threads; every [Listener]
- * call here is marshalled to the main thread to match the old recognizer's
- * delivery semantics (callers touch overlay views / TTS).
+ * During reconnects only the Deepgram client is replaced; the already-running
+ * [AudioStreamer] keeps capturing so there is no gap in PCM delivery.
  */
 class VoiceAssistant(
-    @Suppress("UNUSED_PARAMETER") context: Context,
     private val listener: Listener,
+    private val apiKey: String = BuildConfig.DEEPGRAM_API_KEY,
+    /** Factory used to create (and connect) a [DeepgramSttClient]. Injected for testing. */
+    private val clientFactory: (String, SttCallback) -> DeepgramSttClient = { key, cb ->
+        DeepgramSttClient(key, cb).apply { connect() }
+    },
+    /** Factory used to create an [AudioStreamer]. Injected for testing. */
+    private val captureFactory: (AudioStreamer.AudioFrameListener) -> AudioStreamer = { fl ->
+        AudioStreamer(fl)
+    },
 ) {
     interface Listener {
         fun onPartialSpeech(text: String)
         fun onFinalSpeech(text: String)
         fun onRmsChanged(rms: Float)
         fun onNoSpeech()
+        /** Called when [VoiceAssistant] cannot start (e.g. missing API key). Default is no-op. */
+        fun onError(message: String) {}
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -44,6 +49,9 @@ class VoiceAssistant(
     private var sttClient: DeepgramSttClient? = null
     private var audioStreamer: AudioStreamer? = null
     private var active = false
+
+    /** True once [AudioStreamer.start] has been called for the current session. */
+    private var captureStarted = false
 
     /** Incremented each time we (re)open a client; used to ignore stale callbacks. */
     @Volatile
@@ -68,25 +76,30 @@ class VoiceAssistant(
     fun start() {
         if (active) return
 
-        if (BuildConfig.DEEPGRAM_API_KEY.isBlank()) {
+        if (apiKey.isBlank()) {
             Log.e(TAG, "DEEPGRAM_API_KEY is empty — set it in local.properties and rebuild")
+            listener.onError("Voice recognition is not configured. Please set DEEPGRAM_API_KEY.")
             return
         }
 
         active = true
+        captureStarted = false
 
-        openClient()
-        audioStreamer = AudioStreamer { data, length ->
+        // Create the streamer now so the frame listener closure captures sttClient,
+        // but DO NOT call start() yet — audio capture begins in onOpen() below.
+        audioStreamer = captureFactory { data, length ->
             sttClient?.sendAudio(data, length)
             emitRms(data, length)
-        }.apply { start() }
+        }
 
+        openClient()
         scheduleSilenceTimeout()
     }
 
     fun stop() {
         if (!active) return
         active = false
+        captureStarted = false
         mainHandler.removeCallbacks(silenceTimeout)
         mainHandler.removeCallbacks(reconnectRunnable)
         audioStreamer?.stop()
@@ -96,9 +109,7 @@ class VoiceAssistant(
         sttClient = null
     }
 
-    fun destroy() {
-        stop()
-    }
+    fun destroy() = stop()
 
     /** True if we are listening and the recorder is actively capturing. */
     fun isHealthy(): Boolean = active && audioStreamer?.isCapturing() == true
@@ -109,22 +120,13 @@ class VoiceAssistant(
         start()
     }
 
-    /** Opens (or replaces) the Deepgram client. Audio capture keeps running. */
+    /** Opens (or replaces) the Deepgram client. Audio capture keeps running across reconnects. */
     private fun openClient() {
-        // Bump the generation first so the outgoing client's close/error
-        // callbacks are recognized as stale and don't trigger another reconnect.
         val generation = ++clientGeneration
         sttClient?.close()
-        sttClient = DeepgramSttClient(BuildConfig.DEEPGRAM_API_KEY, makeCallback(generation))
-            .apply { connect() }
+        sttClient = clientFactory(apiKey, makeCallback(generation))
     }
 
-    /**
-     * Deepgram resets streams that go too long without real speech, and any
-     * network blip drops the socket. The old SpeechRecognizer auto-restarted;
-     * mirror that by reconnecting (debounced) whenever the socket fails or
-     * closes while we are still meant to be listening.
-     */
     private fun scheduleReconnect() {
         if (!active) return
         mainHandler.removeCallbacks(reconnectRunnable)
@@ -136,11 +138,6 @@ class VoiceAssistant(
         mainHandler.postDelayed(silenceTimeout, SILENCE_TIMEOUT_MS)
     }
 
-    /**
-     * Computes a coarse loudness from a 16-bit little-endian PCM frame and
-     * reports it on a dB-like scale compatible with the old recognizer's
-     * `onRmsChanged` (consumed by `DaisyOrbView.setVoiceLevel`).
-     */
     private fun emitRms(data: ByteArray, length: Int) {
         var sumSquares = 0.0
         var samples = 0
@@ -153,18 +150,20 @@ class VoiceAssistant(
         }
         if (samples == 0) return
         val rms = kotlin.math.sqrt(sumSquares / samples) // 0..32767
-        // Map perceived loudness into roughly -2..10, the range the orb expects.
         val level = min(1f, (rms / 8000f).toFloat())
         mainHandler.post { listener.onRmsChanged(-2f + level * 12f) }
     }
 
-    /**
-     * Builds a callback bound to a client [generation]. Events from a superseded
-     * client (an old socket we intentionally closed during reconnect) are
-     * ignored, which prevents a close -> reconnect -> close feedback loop.
-     */
     private fun makeCallback(generation: Int) = object : SttCallback {
-        override fun onOpen() = Unit
+
+        override fun onOpen() {
+            // Gate: start capture exactly once per session, on the first confirmed open.
+            // Reconnects replace only the socket; the streamer keeps running.
+            if (!captureStarted) {
+                captureStarted = true
+                audioStreamer?.start()
+            }
+        }
 
         override fun onTranscript(transcript: String, isFinal: Boolean) {
             if (generation != clientGeneration) return
@@ -188,12 +187,7 @@ class VoiceAssistant(
 
     companion object {
         private const val TAG = "DAISY_VOICE"
-
-        /** Silence window before reporting [Listener.onNoSpeech], mirroring the
-         * old recognizer's complete-silence timeout. */
         private const val SILENCE_TIMEOUT_MS = 3200L
-
-        /** Backoff before re-opening a dropped Deepgram stream. */
         private const val RECONNECT_DELAY_MS = 1500L
     }
 }
