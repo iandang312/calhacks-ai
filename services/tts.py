@@ -6,12 +6,12 @@ import tempfile
 
 from deepgram import AsyncDeepgramClient
 
-_MODEL = "aura-asteria-en"
+_MODEL = "aura-2-thalia-en"
 _MAX_CHARS = 500
 
 
-async def _speak_async(text: str, api_key: str) -> None:
-    client = AsyncDeepgramClient(api_key)
+async def _speak_async(text: str) -> None:
+    client = AsyncDeepgramClient()
     audio_bytes = b""
     async for chunk in client.speak.v1.audio.generate(text=text, model=_MODEL):
         audio_bytes += chunk
@@ -35,6 +35,10 @@ def speak(text: str) -> None:
         return
 
     try:
+<<<<<<< HEAD
         asyncio.run(_speak_async(text, api_key))
+=======
+        asyncio.run(_speak_async(text))
+>>>>>>> 5d6e069 (feat: add TTS speak tool via Deepgram async client)
     except Exception as e:
         print(f"WARNING: TTS failed: {e}", file=sys.stderr)

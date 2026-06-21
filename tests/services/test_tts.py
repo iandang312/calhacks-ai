@@ -66,7 +66,6 @@ def test_speak_calls_generate_with_text(monkeypatch):
     with patch("services.tts.AsyncDeepgramClient", return_value=mock_client) as mock_cls:
         speak("hello world")
 
-    mock_cls.assert_called_once_with("test-key")
     assert len(generate_calls) == 1
     assert generate_calls[0]["text"] == "hello world"
 
