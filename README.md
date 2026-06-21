@@ -84,7 +84,9 @@ Agent S
 Android Accessibility API
    ↓
 Real Android App Action
+```
 
+---
 
 ## Setup
 
@@ -122,23 +124,47 @@ cp .env.example .env
 
 Edit `.env` and fill in:
 
-- `GEMINI_API_KEY=...`
-- `GOOGLE_CLOUD_PROJECT=...`
+- `GEMINI_API_KEY=...` — from Google AI Studio
+- `GOOGLE_CLOUD_PROJECT=...` — your GCP project ID
+- `ANTHROPIC_API_KEY=...` — optional alternative LLM (console.anthropic.com)
 
 `.env` is gitignored.
 
-### 4. Prepare the Android emulator (one-time per device)
+### 4. Set up Android SDK and build the app
 
-1. Launch a Samsung-style AVD from Android Studio
-   (<https://developer.android.com/studio>).
-2. Confirm `adb` sees it:
-   ```bash
-   adb devices
-   ```
-3. Push the on-device `atx-agent` that `uiautomator2` needs:
-   ```bash
-   python -m uiautomator2 init
-   ```
+Full step-by-step instructions: [`docs/android-setup.md`](docs/android-setup.md)
+
+Short version (macOS, no Android Studio):
+```bash
+brew install --cask android-commandlinetools
+export ANDROID_HOME=/opt/homebrew/Caskroom/android-commandlinetools/14742923
+export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
+```
+Add both `export` lines to `~/.zshrc` so they persist.
+
+Accept SDK licenses and install required packages:
+```bash
+sdkmanager --licenses
+sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" "emulator" "system-images;android-35;google_apis;arm64-v8a"
+```
+
+Build and install the Android app:
+```bash
+cd android
+echo "sdk.dir=$ANDROID_HOME" > local.properties
+./gradlew installDebug
+cd ..
+```
+
+Create and start an emulator, then push the uiautomator2 on-device agent:
+```bash
+avdmanager create avd -n echomind -k "system-images;android-35;google_apis;arm64-v8a" --device "pixel_6"
+emulator -avd echomind &
+adb wait-for-device
+python -m uiautomator2 init
+```
+
+On the emulator, open EchoMind and follow the setup prompts to grant overlay and accessibility permissions.
 
 ### 5. Start the agentspan server
 

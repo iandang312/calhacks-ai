@@ -1,5 +1,0 @@
-# Copy this file to `local.properties` and fill in your key.
-# Android Studio also writes `sdk.dir` here automatically — keep that line if present.
-# local.properties is gitignored, so your key stays out of version control.
-
-DEEPGRAM_API_KEY=your_deepgram_api_key_here

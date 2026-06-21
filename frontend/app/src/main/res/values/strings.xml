@@ -1,6 +1,0 @@
-<resources>
-    <string name="app_name">Calhacks AI</string>
-    <string name="start">Start</string>
-    <string name="stop">Stop</string>
-    <string name="transcript_hint">Tap Start and speak…</string>
-</resources>
