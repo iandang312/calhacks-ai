@@ -25,6 +25,35 @@ def load_prompt() -> str:
     return PROMPT_PATH.read_text()
 
 
+def _summarize_dump_ui(observation: str) -> str:
+    if "<!-- truncated -->" in observation:
+        return "UI dumped (parse failed, truncated)"
+    # Strip the ## Suggested elements block if present
+    xml_part = observation
+    if observation.startswith("## Suggested elements"):
+        idx = observation.find("<hierarchy")
+        if idx == -1:
+            idx = observation.find("<?xml")
+        xml_part = observation[idx:] if idx != -1 else observation
+    count = xml_part.count("<node")
+    return f"UI dumped: {count} nodes visible"
+
+
+def compress_steps(steps: list[Step]) -> list[Step]:
+    """Return a new list with dump_ui observations replaced by a 1-line summary.
+
+    All other tool observations are passed through unchanged. The original
+    list and Step objects are never mutated.
+    """
+    result = []
+    for step in steps:
+        if step.tool == "dump_ui":
+            result.append(Step(tool=step.tool, args=step.args, observation=_summarize_dump_ui(step.observation)))
+        else:
+            result.append(step)
+    return result
+
+
 @dataclass
 class Step:
     tool: str
@@ -97,7 +126,7 @@ def _run_hand_rolled(
     repeat_count = 0
 
     for _ in range(max_steps):
-        name, args = model_call(system, task, traj.steps)
+        name, args = model_call(system, task, compress_steps(traj.steps))
         sig = (name, json.dumps(args, sort_keys=True))
 
         if sig == last_call:
