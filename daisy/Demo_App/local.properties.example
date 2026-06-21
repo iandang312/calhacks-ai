@@ -2,4 +2,7 @@
 # Android Studio also writes `sdk.dir` here automatically — keep that line if present.
 # local.properties is gitignored, so your key stays out of version control.
 
+# Deepgram powers both speech-to-text and text-to-speech (Aura).
 DEEPGRAM_API_KEY=your_deepgram_api_key_here
+# Optional Aura TTS voice; leave blank for the default "aura-asteria-en".
+DEEPGRAM_TTS_MODEL=

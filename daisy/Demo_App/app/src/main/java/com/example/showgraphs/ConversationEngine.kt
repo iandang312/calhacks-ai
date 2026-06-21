@@ -63,9 +63,8 @@ class ConversationEngine(
     }
 
     fun onNoSpeech() {
-        if (phase == Phase.LISTENING || phase == Phase.CONFIRMING) {
-            callbacks.speak("Didn't catch that, can you say it again?")
-        }
+        // Be patient: a stretch of silence is fine. Daisy stays in her current
+        // phase and keeps listening instead of nagging the user.
     }
 
     /**
@@ -96,12 +95,12 @@ class ConversationEngine(
     }
 
     fun onWake() {
-        // Idempotent: restart cleanly regardless of the current phase. Drop any
-        // pending command, go home, greet, then listen.
+        // Idempotent: restart cleanly regardless of the current phase. Show the
+        // orb over whatever app is on screen (don't navigate away) so Daisy can
+        // act on the current app via the accessibility service, then greet + listen.
         pendingCommand = null
         phase = Phase.GREETING
         callbacks.showOverlay(DaisyState.AWAKE)
-        callbacks.leaveApp()
         Log.i("DAISY_WAKE", "WAKE")
         callbacks.speak("Hi, how can I help you?") {
             phase = Phase.LISTENING
@@ -116,20 +115,15 @@ class ConversationEngine(
         }
 
         val parsed = CommandInterpreter.parse(text)
+        // Be patient: if we can't map the speech to an action yet, just keep
+        // listening silently instead of repeatedly saying we didn't understand.
         if (parsed.action == AgentAction.UNKNOWN) {
-            callbacks.speak(parsed.clarifyQuestion ?: "Didn't catch that, can you say it again?")
+            Log.i(TAG, "no actionable command in: $text — staying patient")
             return
         }
 
-        if (parsed.confidence == Confidence.HIGH) {
-            executeNow(parsed)
-            return
-        }
-
-        pendingCommand = parsed
-        phase = Phase.CONFIRMING
-        callbacks.showOverlay(DaisyState.CONFIRMING)
-        callbacks.speak("I heard you want to ${parsed.summary}. Should I do that?")
+        // Act on the command directly — no "should I do that?" confirmation step.
+        executeNow(parsed)
     }
 
     private fun onConfirmation(text: String) {

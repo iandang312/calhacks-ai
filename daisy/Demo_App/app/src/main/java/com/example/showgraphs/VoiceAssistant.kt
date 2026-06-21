@@ -45,6 +45,11 @@ class VoiceAssistant(
     private var audioStreamer: AudioStreamer? = null
     private var active = false
 
+    /** While muted we keep capturing (for the orb) but stop streaming to Deepgram,
+     * so Daisy never transcribes her own spoken output. */
+    @Volatile
+    private var muted = false
+
     /** Incremented each time we (re)open a client; used to ignore stale callbacks. */
     @Volatile
     private var clientGeneration = 0
@@ -77,11 +82,21 @@ class VoiceAssistant(
 
         openClient()
         audioStreamer = AudioStreamer { data, length ->
-            sttClient?.sendAudio(data, length)
+            if (!muted) sttClient?.sendAudio(data, length)
             emitRms(data, length)
         }.apply { start() }
 
         scheduleSilenceTimeout()
+    }
+
+    /** Stop streaming mic audio to Deepgram (e.g. while Daisy is speaking). */
+    fun pauseInput() {
+        muted = true
+    }
+
+    /** Resume streaming mic audio to Deepgram after Daisy finishes speaking. */
+    fun resumeInput() {
+        muted = false
     }
 
     fun stop() {

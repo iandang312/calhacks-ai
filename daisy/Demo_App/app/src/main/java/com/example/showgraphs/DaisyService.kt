@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
+import com.example.showgraphs.voice.tts.DeepgramTts
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.hypot
@@ -25,6 +26,7 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     private lateinit var conversationEngine: ConversationEngine
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var deepgramTts: DeepgramTts? = null
 
     private var windowManager: WindowManager? = null
     private var overlayOrb: DaisyOrbView? = null
@@ -79,6 +81,12 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
             })
         }
 
+        deepgramTts = DeepgramTts(
+            this,
+            BuildConfig.DEEPGRAM_API_KEY,
+            BuildConfig.DEEPGRAM_TTS_MODEL,
+        )
+
         conversationEngine = ConversationEngine(this)
         voiceAssistant = VoiceAssistant(this, this)
         voiceAssistant.start()
@@ -97,12 +105,30 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
 
     override fun onDestroy() {
         voiceAssistant.destroy()
+        deepgramTts?.shutdown()
         tts?.shutdown()
         removeOverlay()
         super.onDestroy()
     }
 
     override fun speak(text: String, onDone: (() -> Unit)?) {
+        // Mute the mic during playback so Daisy doesn't transcribe her own voice,
+        // then resume once she finishes.
+        if (::voiceAssistant.isInitialized) voiceAssistant.pauseInput()
+        val finish: () -> Unit = {
+            if (::voiceAssistant.isInitialized) voiceAssistant.resumeInput()
+            onDone?.invoke()
+        }
+
+        val dg = deepgramTts
+        if (dg != null && dg.isConfigured) {
+            dg.speak(text, onDone = finish, onError = { androidSpeak(text, finish) })
+        } else {
+            androidSpeak(text, finish)
+        }
+    }
+
+    private fun androidSpeak(text: String, onDone: (() -> Unit)?) {
         if (!ttsReady) {
             onDone?.invoke()
             return
@@ -188,7 +214,7 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
                     speak("I couldn't go back.")
                 }
             }
-            AgentAction.UNKNOWN -> speak("I don't know how to do that yet.")
+            AgentAction.UNKNOWN -> Unit
         }
     }
 

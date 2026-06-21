@@ -35,6 +35,9 @@ android {
             "DEEPGRAM_API_KEY",
             "\"${localProps.getProperty("DEEPGRAM_API_KEY", "")}\"",
         )
+        // Deepgram Aura TTS voice model; override in local.properties if desired.
+        val ttsModel = localProps.getProperty("DEEPGRAM_TTS_MODEL", "").ifBlank { "aura-asteria-en" }
+        buildConfigField("String", "DEEPGRAM_TTS_MODEL", "\"$ttsModel\"")
     }
 
     buildFeatures {

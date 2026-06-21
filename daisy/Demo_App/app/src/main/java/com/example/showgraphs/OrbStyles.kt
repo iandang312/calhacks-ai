@@ -27,7 +27,7 @@ object OrbStyles {
     }
 
     fun captionFor(state: DaisyState): String = when (state) {
-        DaisyState.STANDBY -> "Say \"Hi Daisy\" anytime"
+        DaisyState.STANDBY -> "Say \"Hey Daisy\" anytime"
         DaisyState.AWAKE -> "Hi, how can I help you?"
         DaisyState.LISTENING -> "I'm listening..."
         DaisyState.CONFIRMING -> "Waiting for your confirmation..."

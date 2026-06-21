@@ -114,7 +114,7 @@ class MainActivity : AppCompatActivity() {
                 statusText.setOnClickListener { openAccessibilitySettings() }
             }
             else -> {
-                statusText.text = "Daisy is listening.\nSay \"Hi Daisy\" anytime."
+                statusText.text = "Daisy is listening.\nSay \"Hey Daisy\" anytime."
                 statusText.setOnClickListener(null)
                 orb.setState(DaisyState.STANDBY)
                 startDaisyService()
