@@ -277,6 +277,15 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "speak",
+        "description": "Narrate to the user via text-to-speech. Call before major navigation actions (open_app, press_key home/back) and before finish to summarize what was accomplished.",
+        "parameters": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    },
+    {
         "name": FINISH,
         "description": "End the task. Set success=true if the goal was achieved, false otherwise. Provide a short note.",
         "parameters": {
@@ -336,6 +345,12 @@ def _h_open_app(d: Device, package: str) -> str:
     return d.open_app(package)
 
 
+def _h_speak(d: Device, text: str) -> str:
+    from services.tts import speak
+    speak(text)
+    return f"spoke: {text}"
+
+
 def _h_finish(d: Device, success: bool, note: str) -> str:
     return f"FINISH success={success} note={note}"
 
@@ -349,6 +364,7 @@ HANDLERS: dict[str, Callable[..., str]] = {
     "type_text": _h_type_text,
     "press_key": _h_press_key,
     "open_app": _h_open_app,
+    "speak": _h_speak,
     FINISH: _h_finish,
 }
 
