@@ -1,4 +1,5 @@
 agentspan
+sentry-sdk
 uiautomator2
 python-dotenv
 fastapi
