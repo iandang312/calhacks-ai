@@ -1,5 +1,7 @@
 package com.example.showgraphs
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 
 class ConversationEngine(
@@ -21,6 +23,15 @@ class ConversationEngine(
     // lets the recombined text trigger the wake phrase.
     private val wakeBuffer = StringBuilder()
     private var lastWakeInputAt = 0L
+
+    // Ends an active session after a stretch of silence so Daisy doesn't stay in
+    // LISTENING forever. Re-armed on every utterance, cancelled while she speaks
+    // or executes, so it only fires when the user has truly gone quiet.
+    private val handler = Handler(Looper.getMainLooper())
+    private val inactivityRunnable = Runnable { onInactivityTimeout() }
+
+    // Caps the confirmation reprompt so an unclear yes/no can't loop forever.
+    private var confirmRetries = 0
 
     private enum class Phase {
         STANDBY,
@@ -99,12 +110,15 @@ class ConversationEngine(
         // orb over whatever app is on screen (don't navigate away) so Daisy can
         // act on the current app via the accessibility service, then greet + listen.
         pendingCommand = null
+        confirmRetries = 0
+        cancelInactivityTimeout()
         phase = Phase.GREETING
         callbacks.showOverlay(DaisyState.AWAKE)
         Log.i("DAISY_WAKE", "WAKE")
         callbacks.speak("Hi, how can I help you?") {
             phase = Phase.LISTENING
             callbacks.showOverlay(DaisyState.LISTENING)
+            armInactivityTimeout()
         }
     }
 
@@ -119,6 +133,9 @@ class ConversationEngine(
         // listening silently instead of repeatedly saying we didn't understand.
         if (parsed.action == AgentAction.UNKNOWN) {
             Log.i(TAG, "no actionable command in: $text — staying patient")
+            // The user spoke, just not something we could map. Reset the silence
+            // timer so we keep listening, but don't stay open indefinitely.
+            armInactivityTimeout()
             return
         }
 
@@ -139,27 +156,63 @@ class ConversationEngine(
             CommandInterpreter.isNegative(text) -> {
                 callbacks.speak("Okay, cancelled.") { endSession() }
             }
-            else -> callbacks.speak("Didn't catch that, can you say it again?")
+            else -> {
+                confirmRetries++
+                if (confirmRetries >= MAX_CONFIRM_RETRIES) {
+                    callbacks.speak("I'll leave that for now. Say \"Hi Daisy\" when you need me.") {
+                        endSession()
+                    }
+                } else {
+                    callbacks.speak("Didn't catch that, can you say it again?") {
+                        armInactivityTimeout()
+                    }
+                }
+            }
         }
     }
 
     private fun executeNow(command: ParsedCommand) {
         pendingCommand = null
+        confirmRetries = 0
+        cancelInactivityTimeout()
         phase = Phase.EXECUTING
         callbacks.showOverlay(DaisyState.PROCESSING)
         callbacks.speak("Okay, ${command.summary}.") {
             callbacks.execute(command)
             phase = Phase.LISTENING
             callbacks.showOverlay(DaisyState.LISTENING)
+            armInactivityTimeout()
         }
     }
 
     private fun endSession() {
         pendingCommand = null
+        confirmRetries = 0
+        cancelInactivityTimeout()
         phase = Phase.STANDBY
         wakeBuffer.setLength(0)
         lastWakeInputAt = 0L
         callbacks.hideOverlay()
+    }
+
+    private fun armInactivityTimeout() {
+        handler.removeCallbacks(inactivityRunnable)
+        handler.postDelayed(inactivityRunnable, INACTIVITY_TIMEOUT_MS)
+    }
+
+    private fun cancelInactivityTimeout() {
+        handler.removeCallbacks(inactivityRunnable)
+    }
+
+    private fun onInactivityTimeout() {
+        // Only end an actively-listening session. If Daisy is mid-greeting or
+        // executing, the timer was already cancelled — this is a belt-and-braces
+        // guard against a stale callback firing after a phase change.
+        if (phase != Phase.LISTENING && phase != Phase.CONFIRMING) return
+        Log.i(TAG, "inactivity timeout after ${INACTIVITY_TIMEOUT_MS}ms — ending session")
+        callbacks.speak("I'll be here if you need me. Say \"Hi Daisy\" to wake me.") {
+            endSession()
+        }
     }
 
     fun stopSession() = endSession()
@@ -180,5 +233,15 @@ class ConversationEngine(
 
         /** Cap the wake buffer so old speech can't accumulate unbounded. */
         private const val WAKE_BUFFER_MAX = 64
+
+        /**
+         * End an active session after this much silence while listening, so Daisy
+         * doesn't stay open indefinitely. Tune up if it feels like it cuts users
+         * off before they've had time to respond.
+         */
+        private const val INACTIVITY_TIMEOUT_MS = 10_000L
+
+        /** Give up the confirmation reprompt after this many unclear replies. */
+        private const val MAX_CONFIRM_RETRIES = 2
     }
 }
