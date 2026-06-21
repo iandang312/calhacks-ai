@@ -15,14 +15,94 @@ from typing import Any, Callable
 
 from env.device import Device
 from agent import tools as T
-from agent.tools import _AgentState, make_tools
+from agent.tools import _AgentState, _StepLimitReached, make_tools
 
 
 PROMPT_PATH = Path(__file__).parent / "prompt.md"
 
 
-def load_prompt() -> str:
-    return PROMPT_PATH.read_text()
+def system_with_location(base: str, state, index: dict | None = None) -> str:
+    loc = state.current_location
+    screen = loc.get("screen", "unknown")
+    app = loc.get("app")
+    page = loc.get("page", 0)
+
+    section = f"\n\n## Current location\nscreen: {screen}"
+    if app:
+        section += f" | app: {app}"
+
+    if screen == "home" and index:
+        apps_on_page = [
+            e["name"] for e in index.get("home_screen", [])
+            if e.get("page", 0) == page
+        ]
+        if apps_on_page:
+            section += f"\nApps on this page: {', '.join(apps_on_page)}"
+
+    return base + section
+
+
+def load_prompt(index_path: Path | None = None) -> str:
+    prompt = PROMPT_PATH.read_text()
+
+    if index_path is None:
+        return prompt
+
+    try:
+        data = json.loads(index_path.read_text())
+    except Exception:
+        return prompt
+
+    home_screen = data.get("home_screen", [])
+    dock = data.get("dock", [])
+
+    if not home_screen and not dock:
+        return prompt
+
+    lines = ["## Phone layout"]
+
+    # Group home_screen entries by page
+    pages: dict[int, list[str]] = {}
+    for entry in home_screen:
+        page = entry.get("page", 0)
+        pages.setdefault(page, []).append(f"{entry['name']} ({entry['package']})")
+    for page_num in sorted(pages):
+        lines.append(f"Page {page_num}: {', '.join(pages[page_num])}")
+
+    if dock:
+        dock_items = ", ".join(f"{e['name']} ({e['package']})" for e in dock)
+        lines.append(f"Dock: {dock_items}")
+
+    return prompt + "\n" + "\n".join(lines) + "\n"
+
+
+def _summarize_dump_ui(observation: str) -> str:
+    if "<!-- truncated -->" in observation:
+        return "UI dumped (parse failed, truncated)"
+    # Strip the ## Suggested elements block if present
+    xml_part = observation
+    if observation.startswith("## Suggested elements"):
+        idx = observation.find("<hierarchy")
+        if idx == -1:
+            idx = observation.find("<?xml")
+        xml_part = observation[idx:] if idx != -1 else observation
+    count = xml_part.count("<node")
+    return f"UI dumped: {count} nodes visible"
+
+
+def compress_steps(steps: list[Step]) -> list[Step]:
+    """Return a new list with dump_ui observations replaced by a 1-line summary.
+
+    All other tool observations are passed through unchanged. The original
+    list and Step objects are never mutated.
+    """
+    result = []
+    for step in steps:
+        if step.tool == "dump_ui":
+            result.append(Step(tool=step.tool, args=step.args, observation=_summarize_dump_ui(step.observation)))
+        else:
+            result.append(step)
+    return result
 
 
 @dataclass
@@ -50,20 +130,20 @@ def build_graph(device: Device, max_steps: int = 25, model_call: ModelCall | Non
     AgentRuntime. When model_call is provided (e.g. in tests) the hand-rolled
     loop runs instead, forwarding each turn to that callable.
     """
-    system = load_prompt()
+    system = load_prompt(Path(__file__).parent / "phone_index.json")
 
     def run(task: str) -> Trajectory:
         if model_call is not None:
             return _run_hand_rolled(device, system, task, max_steps, model_call)
-        return _run_agentspan(device, system, task)
+        return _run_agentspan(device, system, task, max_steps)
 
     return run
 
 
-def _run_agentspan(device: Device, system: str, task: str) -> Trajectory:
+def _run_agentspan(device: Device, system: str, task: str, max_steps: int = 25) -> Trajectory:
     from agentspan.agents import Agent, AgentRuntime
 
-    state = _AgentState(task=task)
+    state = _AgentState(task=task, max_steps=max_steps)
     tool_list = make_tools(device, state)
     model = os.environ.get("MODEL", "google_gemini/gemini-2.0-flash")
 
@@ -75,7 +155,10 @@ def _run_agentspan(device: Device, system: str, task: str) -> Trajectory:
     )
 
     with AgentRuntime() as runtime:
-        runtime.run(agent, task)
+        try:
+            runtime.run(agent, task)
+        except _StepLimitReached:
+            pass  # state.note already set
 
     return Trajectory(
         task=task,
@@ -93,11 +176,23 @@ def _run_hand_rolled(
     model_call: ModelCall,
 ) -> Trajectory:
     traj = Trajectory(task=task)
+    loc_state = _AgentState(task=task)
     last_call: tuple[str, str] | None = None
     repeat_count = 0
 
+    index_path = Path(__file__).parent / "phone_index.json"
+    phone_index: dict | None = None
+    if index_path.exists():
+        try:
+            phone_index = json.loads(index_path.read_text())
+        except Exception:
+            pass
+
+    NAVIGATION_TOOLS = {"open_app", "press_key", "swipe"}
+
     for _ in range(max_steps):
-        name, args = model_call(system, task, traj.steps)
+        current_system = system_with_location(system, loc_state, phone_index)
+        name, args = model_call(current_system, task, compress_steps(traj.steps))
         sig = (name, json.dumps(args, sort_keys=True))
 
         if sig == last_call:
@@ -110,6 +205,9 @@ def _run_hand_rolled(
 
         obs = T.call(device, name, args, task=task)
         traj.steps.append(Step(tool=name, args=args, observation=obs))
+
+        if name in NAVIGATION_TOOLS:
+            loc_state.update_location(device)
 
         if T.is_finish(name):
             traj.success = bool(args.get("success", False))
