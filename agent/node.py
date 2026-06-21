@@ -108,7 +108,7 @@ def _run_hand_rolled(
         else:
             last_call, repeat_count = sig, 0
 
-        obs = T.call(device, name, args)
+        obs = T.call(device, name, args, task=task)
         traj.steps.append(Step(tool=name, args=args, observation=obs))
 
         if T.is_finish(name):
