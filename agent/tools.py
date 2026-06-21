@@ -159,6 +159,17 @@ def make_tools(device: Device, state: _AgentState) -> list:
         return result
 
     @_tool
+    def speak(text: str) -> str:
+        """Narrate to the user via text-to-speech. Call before major navigation actions (open_app, press_key home/back) and before finish."""
+        from services.tts import speak as _tts_speak
+        if not text or not text.strip():
+            return "spoke: (empty, skipped)"
+        _tts_speak(text)
+        result = f"spoke: {text}"
+        state.steps.append(("speak", {"text": text}, result))
+        return result
+
+    @_tool
     def finish(success: bool, note: str) -> str:
         """End the task. Set success=true if goal achieved, false otherwise. Provide a short note."""
         state.success = success
@@ -170,7 +181,7 @@ def make_tools(device: Device, state: _AgentState) -> list:
         return result
 
     return [dump_ui, tap, tap_text, long_press, swipe, drag,
-            type_text, press_key, open_app, finish]
+            type_text, press_key, open_app, speak, finish]
 
 
 FINISH = "finish"

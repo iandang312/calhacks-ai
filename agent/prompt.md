@@ -34,6 +34,14 @@ Follow the loop contract:
 - If `tap_text` returns "miss", call `dump_ui` to re-read the screen before retrying. Never guess a second time without fresh UI state.
 - If a dialog or popup appears unexpectedly, dismiss with `press_key("back")` before retrying.
 
+## Voice narration
+
+The user cannot see the screen. Use `speak(text)` to narrate what you are doing:
+- Call `speak` before every `open_app` call, e.g. `speak("Opening Settings")`
+- Call `speak` before navigating back or home, e.g. `speak("Going back to home screen")`
+- Call `speak` with a summary just before `finish`, e.g. `speak("Done. I found 3 unread messages from John.")`
+- Do NOT call `speak` before every tap or swipe — only at meaningful transitions.
+
 ## Do NOT
 
 - Do not call any tool before writing your plan.
