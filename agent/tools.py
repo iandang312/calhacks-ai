@@ -8,12 +8,17 @@ Two surfaces:
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from agentspan.agents import tool as _tool
 
 from env.device import Device
+
+
+class _StepLimitReached(Exception):
+    pass
 
 
 @dataclass
@@ -23,6 +28,34 @@ class _AgentState:
     success: bool = False
     note: str = ""
     finished: bool = False
+    max_steps: int = 25
+    _last_sig: str | None = None
+    _repeat_count: int = 0
+    current_location: dict = field(default_factory=dict)
+
+    def update_location(self, device: "Device") -> None:
+        """Update current_location from device state. No-op if device does not support it."""
+        try:
+            info = device.current_app()
+            if info:
+                self.current_location = {"screen": "app", "app": info.get("package", "unknown")}
+        except Exception:
+            pass
+
+
+def _check_limits(state: _AgentState, tool_name: str, args_sig: str) -> None:
+    sig = f"{tool_name}:{args_sig}"
+    if sig == state._last_sig:
+        state._repeat_count += 1
+        if state._repeat_count >= 2:
+            state.note = f"aborted: tool {tool_name} repeated 3x"
+            raise _StepLimitReached
+    else:
+        state._last_sig = sig
+        state._repeat_count = 0
+    if len(state.steps) >= state.max_steps:
+        state.note = f"aborted: max_steps={state.max_steps} reached"
+        raise _StepLimitReached
 
 
 def make_tools(device: Device, state: _AgentState) -> list:
@@ -30,26 +63,28 @@ def make_tools(device: Device, state: _AgentState) -> list:
 
     @_tool
     def dump_ui() -> str:
-        """Return current UI hierarchy as XML. Call before any coordinate-based action."""
-        xml = device.dump_ui()
-        result = xml if len(xml) < 8000 else xml[:8000] + "\n<!-- truncated -->"
+        """Return current UI hierarchy as XML. Call before any coordinate-based action. Does NOT guarantee the foreground app has finished rendering its first frame."""
+        result = device.dump_ui()
         state.steps.append(("dump_ui", {}, result))
+        _check_limits(state, "dump_ui", json.dumps({}, sort_keys=True))
         return result
 
     @_tool
     def tap(x: int, y: int) -> str:
-        """Tap at absolute pixel coordinates (x, y)."""
+        """Tap at absolute pixel coordinates (x, y). Does NOT verify the tap landed on any element. Coordinates must come from the most recent dump_ui output."""
         device.tap(x, y)
         result = f"tapped ({x},{y})"
         state.steps.append(("tap", {"x": x, "y": y}, result))
+        _check_limits(state, "tap", json.dumps({"x": x, "y": y}, sort_keys=True))
         return result
 
     @_tool
     def tap_text(text: str) -> str:
-        """Tap the first visible element whose text equals or contains the given string."""
+        """Tap the first visible element whose text equals or contains the given string. Does NOT scroll to find off-screen elements. Returns 'miss' immediately if the element is not in the current view."""
         ok = device.tap_text(text)
         result = f"tap_text({text!r}) -> {'hit' if ok else 'miss'}"
         state.steps.append(("tap_text", {"text": text}, result))
+        _check_limits(state, "tap_text", json.dumps({"text": text}, sort_keys=True))
         return result
 
     @_tool
@@ -58,14 +93,16 @@ def make_tools(device: Device, state: _AgentState) -> list:
         device.long_press(x, y, duration)
         result = f"long_press ({x},{y}) for {duration}s"
         state.steps.append(("long_press", {"x": x, "y": y, "duration": duration}, result))
+        _check_limits(state, "long_press", json.dumps({"duration": duration, "x": x, "y": y}, sort_keys=True))
         return result
 
     @_tool
     def swipe(x1: int, y1: int, x2: int, y2: int, duration: float = 0.3) -> str:
-        """Swipe from (x1,y1) to (x2,y2) over duration seconds. Use for scrolling."""
+        """Swipe from (x1,y1) to (x2,y2) over duration seconds. Use for scrolling. Does NOT wait for scroll animation to settle before returning."""
         device.swipe(x1, y1, x2, y2, duration)
         result = f"swiped ({x1},{y1})->({x2},{y2})"
         state.steps.append(("swipe", {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration": duration}, result))
+        _check_limits(state, "swipe", json.dumps({"duration": duration, "x1": x1, "x2": x2, "y1": y1, "y2": y2}, sort_keys=True))
         return result
 
     @_tool
@@ -74,6 +111,7 @@ def make_tools(device: Device, state: _AgentState) -> list:
         device.drag(x1, y1, x2, y2, duration)
         result = f"dragged ({x1},{y1})->({x2},{y2})"
         state.steps.append(("drag", {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration": duration}, result))
+        _check_limits(state, "drag", json.dumps({"duration": duration, "x1": x1, "x2": x2, "y1": y1, "y2": y2}, sort_keys=True))
         return result
 
     @_tool
@@ -82,22 +120,24 @@ def make_tools(device: Device, state: _AgentState) -> list:
         device.type_text(text)
         result = f"typed {text!r}"
         state.steps.append(("type_text", {"text": text}, result))
+        _check_limits(state, "type_text", json.dumps({"text": text}, sort_keys=True))
         return result
 
     @_tool
     def press_key(name: str) -> str:
-        """Press a hardware/system key: home, back, enter, recent, menu, power, volume_up, volume_down."""
+        """Sends an Android keycode event. The 'back' key behavior is app-defined and does NOT guarantee navigation to the previous screen. Keys: home, back, enter, recent, menu, power, volume_up, volume_down."""
         device.press_key(name)
         result = f"pressed {name}"
         state.steps.append(("press_key", {"name": name}, result))
+        _check_limits(state, "press_key", json.dumps({"name": name}, sort_keys=True))
         return result
 
     @_tool
     def open_app(package: str) -> str:
-        """Launch an app by its package name (e.g. com.android.settings)."""
-        device.open_app(package)
-        result = f"opened {package}"
+        """Launch an app by its package name (e.g. com.android.settings). Blocks until the app process reaches the foreground. Does NOT wait for the app's first frame to be drawn — call dump_ui after to read the rendered UI."""
+        result = device.open_app(package)
         state.steps.append(("open_app", {"package": package}, result))
+        _check_limits(state, "open_app", json.dumps({"package": package}, sort_keys=True))
         return result
 
     @_tool
@@ -108,6 +148,7 @@ def make_tools(device: Device, state: _AgentState) -> list:
         state.finished = True
         result = f"FINISH success={success} note={note}"
         state.steps.append(("finish", {"success": success, "note": note}, result))
+        _check_limits(state, "finish", json.dumps({"note": note, "success": success}, sort_keys=True))
         return result
 
     return [dump_ui, tap, tap_text, long_press, swipe, drag,
@@ -124,12 +165,12 @@ def is_finish(tool_name: str) -> bool:
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "dump_ui",
-        "description": "Return the current UI hierarchy as XML. Call this before any coordinate-based action.",
+        "description": "Return the current UI hierarchy as XML. Call this before any coordinate-based action. Does NOT guarantee the foreground app has finished rendering its first frame.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "tap",
-        "description": "Tap at absolute pixel coordinates (x, y).",
+        "description": "Tap at absolute pixel coordinates (x, y). Does NOT verify the tap landed on any element. Coordinates must come from the most recent dump_ui output.",
         "parameters": {
             "type": "object",
             "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
@@ -138,7 +179,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "tap_text",
-        "description": "Tap the first visible element whose text equals or contains the given string. Returns whether an element was found.",
+        "description": "Tap the first visible element whose text equals or contains the given string. Does NOT scroll to find off-screen elements. Returns 'miss' immediately if the element is not in the current view.",
         "parameters": {
             "type": "object",
             "properties": {"text": {"type": "string"}},
@@ -160,7 +201,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "swipe",
-        "description": "Swipe from (x1,y1) to (x2,y2) over `duration` seconds. Use for scrolling.",
+        "description": "Swipe from (x1,y1) to (x2,y2) over `duration` seconds. Use for scrolling. Does NOT wait for scroll animation to settle before returning.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -195,7 +236,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "press_key",
-        "description": "Press a hardware/system key: home, back, enter, recent, menu, power, volume_up, volume_down.",
+        "description": "Sends an Android keycode event (via uiautomator2 `press`). The 'back' key behavior is app-defined and does NOT guarantee navigation to the previous screen. Keys: home, back, enter, recent, menu, power, volume_up, volume_down.",
         "parameters": {
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -227,8 +268,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 
 
 def _h_dump_ui(d: Device) -> str:
-    xml = d.dump_ui()
-    return xml if len(xml) < 8000 else xml[:8000] + "\n<!-- truncated -->"
+    return d.dump_ui()
 
 
 def _h_tap(d: Device, x: int, y: int) -> str:
@@ -267,8 +307,7 @@ def _h_press_key(d: Device, name: str) -> str:
 
 
 def _h_open_app(d: Device, package: str) -> str:
-    d.open_app(package)
-    return f"opened {package}"
+    return d.open_app(package)
 
 
 def _h_finish(d: Device, success: bool, note: str) -> str:
