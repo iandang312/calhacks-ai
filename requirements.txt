@@ -1,11 +1,11 @@
 deepgram-sdk
-agentspan
 anthropic
 uiautomator2
+sounddevice
+numpy
 python-dotenv
-fastapi
-uvicorn[standard]
 pytest
+pytest-asyncio
 presidio-analyzer
 presidio-anonymizer
 spacy

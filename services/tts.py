@@ -1,13 +1,13 @@
 import os
+import platform
+import subprocess
 import sys
+import tempfile
 
-import numpy as np
-import sounddevice as sd
 from deepgram import DeepgramClient
 
 _MODEL = "aura-2-thalia-en"
 _MAX_CHARS = 500
-_SAMPLE_RATE = 24000
 
 
 def speak(text: str) -> None:
@@ -15,29 +15,28 @@ def speak(text: str) -> None:
         return
 
     if not os.environ.get("DEEPGRAM_API_KEY"):
-        print("WARNING: DEEPGRAM_API_KEY not set, skipping TTS", file=sys.stderr)
+        print("[tts] DEEPGRAM_API_KEY not set, skipping", file=sys.stderr)
         return
 
     text = text[:_MAX_CHARS]
     try:
         client = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
-        audio_bytes = b""
-        for chunk in client.speak.v1.audio.generate(
-            text=text,
-            model=_MODEL,
-            encoding="linear16",
-            sample_rate=_SAMPLE_RATE,
-        ):
-            audio_bytes += chunk
+        response = client.speak.v1.audio.generate(text=text, model=_MODEL)
+        audio_bytes = response.stream.getvalue()
 
-        print(f"[tts] received {len(audio_bytes)} bytes", file=sys.stderr)
+        print(f"[tts] {len(audio_bytes)} bytes", file=sys.stderr)
 
-        if not audio_bytes:
-            print("[tts] no audio bytes — check model/plan", file=sys.stderr)
-            return
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+            f.write(audio_bytes)
+            tmp_path = f.name
 
-        audio = np.frombuffer(audio_bytes, dtype=np.int16)
-        sd.play(audio, samplerate=_SAMPLE_RATE)
-        sd.wait()
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.run(["afplay", tmp_path], check=False)
+        elif system == "Windows":
+            subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer).SoundLocation = '{tmp_path}'; Start-Process '{tmp_path}'"], check=False)
+        else:
+            subprocess.run(["mpg123", tmp_path], check=False)
+
     except Exception as e:
         print(f"[tts] ERROR: {e}", file=sys.stderr)
