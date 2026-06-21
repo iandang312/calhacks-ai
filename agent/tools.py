@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from agentspan.agents import tool as _tool
 
+from agent.bm25_rank import bm25_suggest, format_with_suggestions, parse_nodes_from_xml
 from env.device import Device
 
 
@@ -32,7 +33,8 @@ def make_tools(device: Device, state: _AgentState) -> list:
     def dump_ui() -> str:
         """Return current UI hierarchy as XML. Call before any coordinate-based action."""
         xml = device.dump_ui()
-        result = xml if len(xml) < 8000 else xml[:8000] + "\n<!-- truncated -->"
+        suggestions = bm25_suggest(parse_nodes_from_xml(xml), state.task)
+        result = format_with_suggestions(suggestions, xml)
         state.steps.append(("dump_ui", {}, result))
         return result
 
@@ -226,9 +228,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-def _h_dump_ui(d: Device) -> str:
+def _h_dump_ui(d: Device, task: str = "") -> str:
     xml = d.dump_ui()
-    return xml if len(xml) < 8000 else xml[:8000] + "\n<!-- truncated -->"
+    suggestions = bm25_suggest(parse_nodes_from_xml(xml), task)
+    return format_with_suggestions(suggestions, xml)
 
 
 def _h_tap(d: Device, x: int, y: int) -> str:
@@ -289,7 +292,9 @@ HANDLERS: dict[str, Callable[..., str]] = {
 }
 
 
-def call(device: Device, name: str, args: dict[str, Any]) -> str:
+def call(device: Device, name: str, args: dict[str, Any], task: str = "") -> str:
     if name not in HANDLERS:
         return f"ERROR: unknown tool {name}"
+    if name == "dump_ui":
+        return _h_dump_ui(device, task=task)
     return HANDLERS[name](device, **args)
