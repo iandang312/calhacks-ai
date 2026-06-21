@@ -37,14 +37,6 @@ def make_tools(device: Device, state: _AgentState) -> list:
         return result
 
     @_tool
-    def screenshot() -> str:
-        """Capture a PNG screenshot. Saved to last_screenshot.png."""
-        device.screenshot("last_screenshot.png")
-        result = "screenshot saved to last_screenshot.png"
-        state.steps.append(("screenshot", {}, result))
-        return result
-
-    @_tool
     def tap(x: int, y: int) -> str:
         """Tap at absolute pixel coordinates (x, y)."""
         device.tap(x, y)
@@ -118,7 +110,7 @@ def make_tools(device: Device, state: _AgentState) -> list:
         state.steps.append(("finish", {"success": success, "note": note}, result))
         return result
 
-    return [dump_ui, screenshot, tap, tap_text, long_press, swipe, drag,
+    return [dump_ui, tap, tap_text, long_press, swipe, drag,
             type_text, press_key, open_app, finish]
 
 
@@ -133,11 +125,6 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "dump_ui",
         "description": "Return the current UI hierarchy as XML. Call this before any coordinate-based action.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "screenshot",
-        "description": "Capture a PNG screenshot of the current screen. Use sparingly.",
         "parameters": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -244,11 +231,6 @@ def _h_dump_ui(d: Device) -> str:
     return xml if len(xml) < 8000 else xml[:8000] + "\n<!-- truncated -->"
 
 
-def _h_screenshot(d: Device) -> str:
-    d.screenshot("last_screenshot.png")
-    return "screenshot saved to last_screenshot.png"
-
-
 def _h_tap(d: Device, x: int, y: int) -> str:
     d.tap(int(x), int(y))
     return f"tapped ({x},{y})"
@@ -295,7 +277,6 @@ def _h_finish(d: Device, success: bool, note: str) -> str:
 
 HANDLERS: dict[str, Callable[..., str]] = {
     "dump_ui": _h_dump_ui,
-    "screenshot": _h_screenshot,
     "tap": _h_tap,
     "tap_text": _h_tap_text,
     "long_press": _h_long_press,
