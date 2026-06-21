@@ -51,14 +51,15 @@ def _setup_log(logs_dir: Path) -> Path:
     return log_path
 
 
-def _append_trajectory(log_path: Path, task: str, traj, started: datetime.datetime) -> None:
+def _append_trajectory(log_path: Path, task: str, traj, started: datetime.datetime, interrupted: bool = False) -> None:
     duration = (datetime.datetime.now() - started).total_seconds()
     block = {
         "task": task,
         "started_at": started.isoformat(),
         "duration_seconds": round(duration, 2),
-        "success": traj.success,
-        "note": traj.note,
+        "interrupted": interrupted,
+        "success": traj.success if not interrupted else None,
+        "note": traj.note if not interrupted else "session interrupted by user",
         "steps": [
             {
                 "step": i + 1,
@@ -73,6 +74,18 @@ def _append_trajectory(log_path: Path, task: str, traj, started: datetime.dateti
         f.write("\n--- TASK ---\n")
         f.write(json.dumps(block, indent=2))
         f.write("\n")
+
+
+def _print_trajectory(traj, interrupted: bool = False) -> None:
+    print()
+    for i, s in enumerate(traj.steps, 1):
+        print(f"  [{i}] {s.tool}({s.args})")
+        print(f"       -> {s.observation}")
+    if interrupted:
+        print("\n  [INTERRUPTED] partial trajectory above")
+    else:
+        status = "SUCCESS" if traj.success else "FAILED"
+        print(f"\n  [{status}] {traj.note}")
 
 
 def main() -> None:
@@ -95,16 +108,22 @@ def main() -> None:
             continue
 
         started = datetime.datetime.now()
-        traj = run(task)
-        _append_trajectory(log_path, task, traj, started)
+        interrupted = False
+        # Use a minimal stub trajectory so we always have something to log
+        from agent.node import Trajectory
+        traj = Trajectory(task=task)
+        try:
+            traj = run(task)
+        except KeyboardInterrupt:
+            interrupted = True
+            print("\n[interrupted]")
 
-        print()
-        for i, s in enumerate(traj.steps, 1):
-            print(f"  [{i}] {s.tool}({s.args})")
-            print(f"       -> {s.observation}")
-        status = "SUCCESS" if traj.success else "FAILED"
-        print(f"\n  [{status}] {traj.note}")
+        _append_trajectory(log_path, task, traj, started, interrupted=interrupted)
+        _print_trajectory(traj, interrupted=interrupted)
         print(f"  (logged to {log_path.name})\n")
+
+        if interrupted:
+            break
 
 
 if __name__ == "__main__":
