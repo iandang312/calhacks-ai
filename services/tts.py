@@ -35,10 +35,6 @@ def speak(text: str) -> None:
         return
 
     try:
-<<<<<<< HEAD
-        asyncio.run(_speak_async(text, api_key))
-=======
         asyncio.run(_speak_async(text))
->>>>>>> 5d6e069 (feat: add TTS speak tool via Deepgram async client)
     except Exception as e:
         print(f"WARNING: TTS failed: {e}", file=sys.stderr)
