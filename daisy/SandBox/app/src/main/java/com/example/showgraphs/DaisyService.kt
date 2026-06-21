@@ -27,6 +27,7 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private var deepgramTts: DeepgramTts? = null
+    private lateinit var intentClient: IntentServiceClient
 
     private var windowManager: WindowManager? = null
     private var overlayOrb: DaisyOrbView? = null
@@ -87,6 +88,8 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
             BuildConfig.DEEPGRAM_TTS_MODEL,
         )
 
+        intentClient = IntentServiceClient(BuildConfig.INTENT_SERVICE_URL)
+
         conversationEngine = ConversationEngine(this)
         voiceAssistant = VoiceAssistant(this, this)
         voiceAssistant.start()
@@ -105,6 +108,7 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
 
     override fun onDestroy() {
         voiceAssistant.destroy()
+        if (::intentClient.isInitialized) intentClient.cancel()
         deepgramTts?.shutdown()
         tts?.shutdown()
         removeOverlay()
@@ -216,6 +220,18 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
             }
             AgentAction.UNKNOWN -> Unit
         }
+    }
+
+    override fun inferIntent(
+        transcript: String,
+        onPlan: (String) -> Unit,
+        onError: (String) -> Unit,
+    ) {
+        intentClient.infer(transcript, onPlan = onPlan, onError = onError)
+    }
+
+    override fun cancelIntent() {
+        if (::intentClient.isInitialized) intentClient.cancel()
     }
 
     override fun onPartialSpeech(text: String) {

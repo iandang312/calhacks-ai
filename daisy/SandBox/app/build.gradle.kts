@@ -38,6 +38,11 @@ android {
         // Deepgram Aura TTS voice model; override in local.properties if desired.
         val ttsModel = localProps.getProperty("DEEPGRAM_TTS_MODEL", "").ifBlank { "aura-asteria-en" }
         buildConfigField("String", "DEEPGRAM_TTS_MODEL", "\"$ttsModel\"")
+
+        // Base URL of the backend intent service (backend/intent_service). From the
+        // emulator the host machine is 10.0.2.2; override for a physical device.
+        val intentUrl = localProps.getProperty("INTENT_SERVICE_URL", "").ifBlank { "http://10.0.2.2:8000" }
+        buildConfigField("String", "INTENT_SERVICE_URL", "\"$intentUrl\"")
     }
 
     buildFeatures {
