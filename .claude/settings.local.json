@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "deepgram-docs"
+  ],
+  "enableAllProjectMcpServers": true
+}

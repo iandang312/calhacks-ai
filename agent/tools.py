@@ -12,8 +12,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from agentspan.agents import tool as _tool
-
 from agent.bm25_rank import bm25_suggest, format_with_suggestions, parse_nodes_from_xml
 from env.device import Device
 
@@ -75,7 +73,8 @@ def _check_limits(state: _AgentState, tool_name: str, args_sig: str) -> None:
 
 
 def make_tools(device: Device, state: _AgentState) -> list:
-    """Return agentspan @tool objects with device bound via closure."""
+    """Return agentspan @tool objects with device bound via closure. Deprecated — use anthropic_loop."""
+    from agentspan.agents import tool as _tool  # noqa: import kept for legacy path
 
     @_tool
     def dump_ui() -> str:

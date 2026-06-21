@@ -1,92 +1,86 @@
-# calhacks-ai — Android UI Agent (MVP)
+# calhacks-ai — Voice-Driven Android Assistant (MVP)
 
-Base agent that drives a Samsung Android emulator via `uiautomator2`,
-orchestrated with `agentspan`. Action set: tap, tap_text, long_press, swipe,
-drag, type_text, press_key, open_app, dump_ui, screenshot, finish.
+Agent that listens via microphone, clarifies intent, then drives a connected Android device via `uiautomator2`. Think Siri but agentic — no hardcoded flows, the agent navigates the real UI.
 
 ## Prerequisites
 
-1. Android Studio + a running AVD (Samsung-style system image). See
-   <https://developer.android.com/studio>.
-2. `adb devices` shows the emulator.
+1. Connected Android device or running AVD (Samsung-style).
+2. `adb devices` shows the device.
 3. `python -m uiautomator2 init` (one-time per device — installs atx-agent).
 4. Python 3.11+, `pip install -r requirements.txt`.
-5. `cp .env.example .env` and set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+5. `cp .env.example .env` and fill in `ANTHROPIC_API_KEY` and `DEEPGRAM_API_KEY`.
 
 ## Run
 
-CLI (local):
+Start the full voice loop (mic → STT → intent → agent → TTS):
 ```
-python -m agent.run "open the settings app"
-```
-
-HTTP service (for the Java side to call):
-```
-uvicorn agent.server:app --host 0.0.0.0 --port 8000
-# POST http://localhost:8000/agent/run  {"task": "open the settings app"}
-# GET  http://localhost:8000/health
+python main.py
 ```
 
 ## Test
 
 ```
+pytest -q
+```
+
+Device integration tests require a live device:
+```
 RUN_DEVICE_TESTS=1 pytest -q
 ```
 
-Device tests are integration-only; they hit the live emulator (no mocks).
-Skipped unless the env flag is set.
+## Architecture
+
+```
+Microphone
+  │
+  ▼
+audio/stt.py          — Deepgram live STT (nova-2, Python mic capture)
+  │  transcript
+  ▼
+backend/intent_service/intent.py  — Claude clarifies noisy STT → first-person plan
+  │  plan
+  ├─► services/tts.py             — speak plan back to user (Deepgram TTS)
+  ▼
+agent/anthropic_loop.py           — Claude tool-use loop drives the device
+  │  per-turn screenshot + tool calls
+  ▼
+env/device.py                     — uiautomator2 Device wrapper
+  │
+  ▼
+Android device (via ADB)
+```
+
+All orchestration lives in `main.py`. No HTTP servers, no subprocesses — one Python process.
 
 ## Module map
 
-- `env/device.py` — `Device` class wrapping `uiautomator2`. Reusable.
-- `agent/tools.py` — JSON-schema tool definitions + `(device, **args) -> str`
-  handlers. `finish` is a sentinel.
-- `agent/prompt.md` — system prompt: loop contract, do/don't, two few-shots.
-- `agent/node.py` — `build_graph(device, max_steps, model_call)` returns a
-  `run(task) -> Trajectory`. `model_call` is the seam for the agentspan Agent
-  node — wire it to the SDK when integrating the LLM.
-- `agent/run.py` — CLI entrypoint.
-- `agent/server.py` — FastAPI wrapper. `POST /agent/run` and `GET /health`.
-  This is the boundary the Java side calls.
+- `main.py` — entry point; `voice_loop(device)` runs the pipeline forever.
+- `audio/stt.py` — `capture_speech() -> str`; `listen_once(callback)` for lower-level use.
+- `services/tts.py` — `speak(text)` via Deepgram aura-2.
+- `backend/intent_service/intent.py` — `async infer_intent(text) -> str`; called directly (no HTTP).
+- `env/device.py` — `Device` class wrapping `uiautomator2`. All device actions go through here.
+- `agent/tools.py` — tool schemas + handlers. New tools: add schema + handler here, wire primitive into `env/device.py` first.
+- `agent/anthropic_loop.py` — `run_anthropic(device, system, task)` → `Trajectory`.
+- `agent/prompt.md` — system prompt: loop contract, conversational mode, voice narration rules.
 
-## Architecture decision: Python service, Java client
+## Conversational mode
 
-The Deepgram transcription and simulation/orchestration logic live in Java.
-The agent loop lives in Python because `uiautomator2` (and the agentspan
-Python SDK) are the most mature options for driving an Android device.
+The agent handles both device-control requests ("open settings") and conversational requests ("what's the weather?"). For conversational requests, the agent calls `speak()` with its answer and finishes without touching the device — no special routing needed.
 
-Rather than rewrite either side, the two languages are split across an
-HTTP boundary:
+## Dev / isolation tools (not production)
 
-- **Java owns the system flow**: speech → text (Deepgram), task framing,
-  multi-step orchestration, user-facing UI.
-- **Python owns one narrow capability**: "given a task string, drive the
-  emulator and return a trajectory." Exposed as a single FastAPI service
-  (`agent/server.py`).
+- `agent/run.py` — CLI for testing a single task without microphone: `python -m agent.run "open settings"`
+- `tests/manual_run.py` — isolated module tests; run individual components manually.
 
-Why HTTP and not an in-process bridge (JPype/Py4J):
-- Decouples deployment — each side restarts independently.
-- Debuggable in isolation (curl the endpoint, run the Java side without
-  the agent up).
-- Cross-call rate is low (one call per user task, not per UI action), so
-  HTTP latency is irrelevant.
+## Deprecated (do not use)
 
-If finer-grained control is needed later (Java wants to send individual
-actions instead of full tasks), expand the HTTP surface — do not collapse
-the boundary.
+- `agent/server.py` — FastAPI HTTP server; replaced by direct function calls in `main.py`.
+- `backend/intent_service/api/` and `backend/intent_service/main.py` — HTTP wrapper around intent service; removed. Use `intent.py` directly.
+- `daisy/` and `frontend/` — Android Kotlin/Java code that owned Deepgram STT/TTS and device control. Replaced entirely by the Python pipeline above.
+- `agent/node.py` — agentspan-based graph; replaced by `agent/anthropic_loop.py`.
 
 ## Conventions
 
-- All device actions go through `Device` — never call `uiautomator2` directly
-  from agent code.
-- New tools: add schema + handler in `agent/tools.py`, wire any new device
-  primitive into `env/device.py` first.
-- Step cap defaults to 25; repeated identical tool calls abort after 3.
-- Loop guarantees: one tool call per turn; `finish` terminates immediately.
-
-## Known TODOs
-
-- Wire `model_call` in `agent/run.py` to the agentspan Agent node (currently
-  a stub that finishes immediately).
-- Add vision/screenshot input to the model if XML perception proves
-  insufficient.
+- All device actions go through `Device` — never call `uiautomator2` directly from agent code.
+- Step cap defaults to 25; agent aborts after 3 identical tool calls in a row.
+- Model: `MODEL` env var, defaults to `claude-haiku-4-5`.
