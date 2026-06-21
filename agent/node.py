@@ -121,4 +121,4 @@ def _run_hand_rolled(
 
 
 def llm_env_key() -> str | None:
-    return os.environ.get("GEMINI_API_KEY")
+    return os.environ.get("ANTHROPIC_API_KEY")
