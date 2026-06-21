@@ -15,6 +15,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
+import com.example.showgraphs.voice.ElevenLabsTts
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.hypot
@@ -25,6 +26,7 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
     private lateinit var conversationEngine: ConversationEngine
     private var tts: TextToSpeech? = null
     private var ttsReady = false
+    private var elevenLabs: ElevenLabsTts? = null
 
     private var windowManager: WindowManager? = null
     private var overlayOrb: DaisyOrbView? = null
@@ -79,6 +81,12 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
             })
         }
 
+        elevenLabs = ElevenLabsTts(
+            this,
+            BuildConfig.ELEVENLABS_API_KEY,
+            BuildConfig.ELEVENLABS_VOICE_ID,
+        )
+
         conversationEngine = ConversationEngine(this)
         voiceAssistant = VoiceAssistant(this, this)
         voiceAssistant.start()
@@ -86,12 +94,30 @@ class DaisyService : android.app.Service(), ConversationEngine.Callbacks, VoiceA
 
     override fun onDestroy() {
         voiceAssistant.destroy()
+        elevenLabs?.shutdown()
         tts?.shutdown()
         removeOverlay()
         super.onDestroy()
     }
 
     override fun speak(text: String, onDone: (() -> Unit)?) {
+        // Stop feeding the mic to STT so Daisy doesn't transcribe her own voice,
+        // then resume once playback completes.
+        if (::voiceAssistant.isInitialized) voiceAssistant.pauseInput()
+        val finish: () -> Unit = {
+            if (::voiceAssistant.isInitialized) voiceAssistant.resumeInput()
+            onDone?.invoke()
+        }
+
+        val eleven = elevenLabs
+        if (eleven != null && eleven.isConfigured) {
+            eleven.speak(text, onDone = finish, onError = { androidSpeak(text, finish) })
+        } else {
+            androidSpeak(text, finish)
+        }
+    }
+
+    private fun androidSpeak(text: String, onDone: (() -> Unit)?) {
         if (!ttsReady) {
             onDone?.invoke()
             return

@@ -1,17 +1,26 @@
 package com.example.showgraphs
 
 import android.content.Context
-import android.content.Intent
-import android.os.Bundle
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import com.example.showgraphs.voice.AudioStreamer
+import com.example.showgraphs.voice.DeepgramSttClient
 
+/**
+ * Always-on listening backed by Deepgram streaming STT.
+ *
+ * Keeps the same [Listener] contract the rest of Daisy was built against
+ * (partial/final speech, voice level, no-speech) so the conversation engine
+ * is unchanged — only the recognition backend swapped from the on-device
+ * [android.speech.SpeechRecognizer] to Deepgram, which handles atypical
+ * speech far better.
+ */
 class VoiceAssistant(
     context: Context,
     private val listener: Listener,
-) {
+) : DeepgramSttClient.Callback {
+
     interface Listener {
         fun onPartialSpeech(text: String)
         fun onFinalSpeech(text: String)
@@ -20,83 +29,110 @@ class VoiceAssistant(
     }
 
     private val appContext = context.applicationContext
-    private var speechRecognizer: SpeechRecognizer? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private var sttClient: DeepgramSttClient? = null
+    private var audioStreamer: AudioStreamer? = null
+
     private var active = false
 
-    fun start() {
-        if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
-            Log.w(TAG, "Speech recognition unavailable")
-            return
-        }
-        if (speechRecognizer == null) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(appContext).apply {
-                setRecognitionListener(recognitionListener)
+    /** When muted we keep capturing (for the orb) but stop feeding Deepgram, so
+     * Daisy never transcribes her own ElevenLabs voice. */
+    @Volatile private var muted = false
+    private var heardSinceReset = false
+
+    private val silenceTimeout = object : Runnable {
+        override fun run() {
+            if (active && !muted) {
+                listener.onNoSpeech()
+                heardSinceReset = false
+                armSilenceTimer()
             }
+        }
+    }
+
+    fun start() {
+        val apiKey = BuildConfig.DEEPGRAM_API_KEY
+        if (apiKey.isBlank()) {
+            Log.e(TAG, "DEEPGRAM_API_KEY is empty — set it in local.properties and rebuild")
+            return
         }
         if (active) return
         active = true
-        speechRecognizer?.startListening(recognitionIntent())
+
+        sttClient = DeepgramSttClient(apiKey, this).also { it.connect() }
+        audioStreamer = AudioStreamer { data, length ->
+            listener.onRmsChanged(AudioStreamer.rmsLevel(data, length))
+            if (!muted) sttClient?.sendAudio(data, length)
+        }.also { it.start() }
+
+        armSilenceTimer()
+    }
+
+    /** Stop feeding audio to Deepgram (e.g. while Daisy is speaking). */
+    fun pauseInput() {
+        muted = true
+        cancelSilenceTimer()
+        sttClient?.keepAlive()
+    }
+
+    /** Resume feeding audio to Deepgram after Daisy finishes speaking. */
+    fun resumeInput() {
+        muted = false
+        heardSinceReset = false
+        armSilenceTimer()
     }
 
     fun stop() {
         active = false
-        speechRecognizer?.cancel()
+        cancelSilenceTimer()
+        audioStreamer?.stop()
+        audioStreamer = null
     }
 
     fun destroy() {
         stop()
-        speechRecognizer?.destroy()
-        speechRecognizer = null
+        sttClient?.finish()
+        sttClient?.close()
+        sttClient = null
     }
 
-    private fun recognitionIntent(): Intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 8000L)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2600L)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 3200L)
+    private fun armSilenceTimer() {
+        cancelSilenceTimer()
+        mainHandler.postDelayed(silenceTimeout, SILENCE_MS)
     }
 
-    private fun restart() {
-        if (!active) return
-        speechRecognizer?.startListening(recognitionIntent())
-    }
+    private fun cancelSilenceTimer() = mainHandler.removeCallbacks(silenceTimeout)
 
-    private val recognitionListener = object : RecognitionListener {
-        override fun onReadyForSpeech(params: Bundle?) = Unit
-        override fun onBeginningOfSpeech() = Unit
-        override fun onRmsChanged(rmsdB: Float) = listener.onRmsChanged(rmsdB)
-        override fun onBufferReceived(buffer: ByteArray?) = Unit
-        override fun onEndOfSpeech() = Unit
+    // --- DeepgramSttClient.Callback (invoked on OkHttp background threads) ---
 
-        override fun onError(error: Int) {
-            when (error) {
-                SpeechRecognizer.ERROR_NO_MATCH,
-                SpeechRecognizer.ERROR_SPEECH_TIMEOUT,
-                -> listener.onNoSpeech()
-            }
-            if (active) restart()
+    override fun onOpen() = Unit
+
+    override fun onTranscript(transcript: String, isFinal: Boolean) {
+        mainHandler.post {
+            heardSinceReset = true
+            armSilenceTimer()
+            if (isFinal) listener.onFinalSpeech(transcript) else listener.onPartialSpeech(transcript)
         }
-
-        override fun onResults(results: Bundle?) {
-            val text = results?.bestText().orEmpty()
-            if (text.isNotBlank()) listener.onFinalSpeech(text)
-            if (active) restart()
-        }
-
-        override fun onPartialResults(partialResults: Bundle?) {
-            val text = partialResults?.bestText().orEmpty()
-            if (text.isNotBlank()) listener.onPartialSpeech(text)
-        }
-
-        override fun onEvent(eventType: Int, params: Bundle?) = Unit
     }
 
-    private fun Bundle.bestText(): String? =
-        getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+    override fun onUtteranceEnd() {
+        // A pause was detected. If nothing was transcribed in this window, treat
+        // it like the old "no speech" timeout so Daisy can re-prompt.
+        mainHandler.post {
+            if (active && !muted && !heardSinceReset) listener.onNoSpeech()
+            heardSinceReset = false
+        }
+    }
+
+    override fun onError(message: String) {
+        Log.e(TAG, "STT error: $message")
+    }
+
+    override fun onClose() = Unit
 
     companion object {
         private const val TAG = "DAISY_VOICE"
+        private const val SILENCE_MS = 8000L
     }
 }
