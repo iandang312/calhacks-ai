@@ -285,17 +285,10 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-<<<<<<< HEAD
 def _h_dump_ui(d: Device, task: str = "") -> str:
     xml = d.dump_ui()
     suggestions = bm25_suggest(parse_nodes_from_xml(xml), task)
     return format_with_suggestions(suggestions, xml)
-=======
-def _h_dump_ui(d: Device, task: str = "") -> str:
-    xml = d.dump_ui()
-    suggestions = bm25_suggest(parse_nodes_from_xml(xml), task)
-    return format_with_suggestions(suggestions, xml)
->>>>>>> ca78659 (tasks 4-8: phone index, location tracking, open_app blocking, tool fidelity, max-steps guard)
 
 
 def _h_tap(d: Device, x: int, y: int) -> str:
