@@ -127,7 +127,22 @@ Edit `.env` and fill in:
 
 `.env` is gitignored.
 
-### 4. Prepare the Android emulator (one-time per device)
+### 4. Download the spaCy NLP model (one-time)
+
+The PII protection service uses spaCy's large English model for named-entity
+recognition (person names, locations, organisations):
+
+```bash
+python -m spacy download en_core_web_lg
+```
+
+Verify:
+
+```bash
+python -c "import spacy; spacy.load('en_core_web_lg'); print('ok')"
+```
+
+### 5. Prepare the Android emulator (one-time per device)
 
 1. Launch a Samsung-style AVD from Android Studio
    (<https://developer.android.com/studio>).
@@ -140,7 +155,7 @@ Edit `.env` and fill in:
    python -m uiautomator2 init
    ```
 
-### 5. Start the agentspan server
+### 6. Start the agentspan server
 
 The agent runtime requires the agentspan server running locally. This script
 loads credentials from `.env` into the server's store and starts it:
@@ -192,6 +207,11 @@ curl -X POST http://localhost:8000/agent/run \
 Unit tests — no emulator, no LLM:
 ```bash
 pytest tests/test_agent_loop.py -q
+```
+
+PII protection tests — no emulator, spaCy model required:
+```bash
+pytest tests/services/test_pii_redactor.py -v -s
 ```
 
 LLM integration tests — agentspan server required:
