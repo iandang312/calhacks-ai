@@ -7,3 +7,4 @@ pytest
 presidio-analyzer
 presidio-anonymizer
 spacy
+rank-bm25
