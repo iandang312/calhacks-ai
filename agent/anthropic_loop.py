@@ -27,7 +27,7 @@ from agent.tools import TOOL_SCHEMAS
 from env.device import Device
 
 
-DEFAULT_MODEL = "claude-sonnet-4-5"
+DEFAULT_MODEL = "claude-haiku-4-5"
 DEFAULT_MAX_TOKENS = 4096
 
 
