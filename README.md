@@ -124,6 +124,8 @@ Edit `.env` and fill in:
 
 - `GEMINI_API_KEY=...`
 - `GOOGLE_CLOUD_PROJECT=...`
+- `ANTHROPIC_API_KEY=...`
+- `SENTRY_DSN=...` (optional — get from sentry.io project settings; enables error tracking in the manual runner)
 
 `.env` is gitignored.
 

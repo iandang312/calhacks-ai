@@ -27,9 +27,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import os
+
+import sentry_sdk
 from dotenv import load_dotenv
 
 load_dotenv()
+
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN"),
+    traces_sample_rate=1.0,
+)
 
 from env.device import Device
 from agent.node import build_graph
@@ -109,7 +117,6 @@ def main() -> None:
 
         started = datetime.datetime.now()
         interrupted = False
-        # Use a minimal stub trajectory so we always have something to log
         from agent.node import Trajectory
         traj = Trajectory(task=task)
         try:
@@ -117,6 +124,24 @@ def main() -> None:
         except KeyboardInterrupt:
             interrupted = True
             print("\n[interrupted]")
+
+        trajectory_context = {
+            "task": task,
+            "success": traj.success,
+            "note": traj.note,
+            "steps": [
+                {"step": i + 1, "tool": s.tool, "args": str(s.args), "observation": s.observation[:200]}
+                for i, s in enumerate(traj.steps)
+            ],
+        }
+        with sentry_sdk.new_scope() as scope:
+            scope.set_tag("task", task)
+            scope.set_tag("success", str(traj.success))
+            scope.set_context("trajectory", trajectory_context)
+            sentry_sdk.capture_message(
+                f"[{'INTERRUPTED' if interrupted else 'SUCCESS' if traj.success else 'FAILED'}] {task}",
+                level="info" if traj.success else "error",
+            )
 
         _append_trajectory(log_path, task, traj, started, interrupted=interrupted)
         _print_trajectory(traj, interrupted=interrupted)
