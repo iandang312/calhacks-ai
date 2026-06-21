@@ -129,5 +129,21 @@ class Device:
             raise ValueError(f"Unsupported key: {name}")
         self.d.press(key)
 
-    def open_app(self, package: str) -> None:
+    def current_app(self) -> dict:
+        try:
+            return self.d.app_current()
+        except Exception:
+            return {"package": "unknown", "activity": ""}
+
+    def open_app(self, package: str) -> str:
         self.d.app_start(package)
+        try:
+            ok = self.d.app_wait(package, front=True, timeout=10)
+        except Exception:
+            ok = False
+        if not ok:
+            return f"open_app({package}): timeout waiting for foreground"
+        # Wait for at least one element in the app to be drawn (first frame rendered).
+        # app_wait only guarantees the process is foreground, not that the UI is ready.
+        self.d(packageName=package).wait(timeout=5)
+        return f"opened {package} (in foreground)"
