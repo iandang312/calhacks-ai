@@ -21,10 +21,14 @@ def speak(text: str) -> None:
     text = text[:_MAX_CHARS]
     try:
         client = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
-        response = client.speak.v1.audio.generate(text=text, model=_MODEL)
-        audio_bytes = response.stream.getvalue()
+        audio_bytes = b""
+        for chunk in client.speak.v1.audio.generate(text=text, model=_MODEL):
+            audio_bytes += chunk
 
         print(f"[tts] {len(audio_bytes)} bytes", file=sys.stderr)
+        if not audio_bytes:
+            print("[tts] 0 bytes — check Deepgram plan/model", file=sys.stderr)
+            return
 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
             f.write(audio_bytes)
@@ -34,9 +38,9 @@ def speak(text: str) -> None:
         if system == "Darwin":
             subprocess.run(["afplay", tmp_path], check=False)
         elif system == "Windows":
-            subprocess.run(["powershell", "-c", f"(New-Object Media.SoundPlayer).SoundLocation = '{tmp_path}'; Start-Process '{tmp_path}'"], check=False)
+            subprocess.run(["powershell", "-c", f"Add-Type -AssemblyName presentationCore; $mp = New-Object system.windows.media.mediaplayer; $mp.open([uri]'{tmp_path}'); $mp.Play(); Start-Sleep 5"], check=False)
         else:
-            subprocess.run(["mpg123", tmp_path], check=False)
+            subprocess.run(["mpg123", "-q", tmp_path], check=False)
 
     except Exception as e:
         print(f"[tts] ERROR: {e}", file=sys.stderr)
