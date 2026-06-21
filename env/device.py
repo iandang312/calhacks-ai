@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import xml.etree.ElementTree as ET
+from io import BytesIO
 
 import uiautomator2 as u2
 
@@ -91,11 +92,14 @@ class Device:
         return filter_xml(raw, self.viewport)
 
     def screenshot(self, path: str | None = None) -> bytes:
-        img = self.d.screenshot(format="raw")
+        pil_img = self.d.screenshot()  # PIL Image
+        buf = BytesIO()
+        pil_img.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
         if path:
             with open(path, "wb") as f:
-                f.write(img)
-        return img
+                f.write(png_bytes)
+        return png_bytes
 
     def tap(self, x: int, y: int) -> None:
         self.d.click(x, y)
