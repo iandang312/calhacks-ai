@@ -1,4 +1,5 @@
 agentspan
+anthropic
 uiautomator2
 python-dotenv
 fastapi
