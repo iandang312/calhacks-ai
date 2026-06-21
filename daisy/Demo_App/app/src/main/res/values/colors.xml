@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="orb_idle_center">#FFDDB8A4</color>
+    <color name="orb_idle_edge">#FFC89B86</color>
+    <color name="orb_primed_center">#FFF0B352</color>
+    <color name="orb_primed_edge">#FFD99136</color>
+    <color name="orb_listening_center">#FFDDB8A4</color>
+    <color name="orb_listening_edge">#FFC89B86</color>
+    <color name="caption_text">#FFE2E8F0</color>
+    <color name="daisy_backdrop">#FFDDB8A4</color>
+    <color name="daisy_petal">#FFFFF4E2</color>
+    <color name="daisy_center">#FFF0B352</color>
+    <color name="daisy_center_idle">#FFE7A94C</color>
+    <color name="daisy_center_processing">#FFE9963C</color>
+</resources>
