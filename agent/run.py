@@ -1,18 +1,19 @@
 """CLI entrypoint: `python -m agent.run "open the settings app"`."""
 from __future__ import annotations
 
+import os
 import sys
 
 from dotenv import load_dotenv
 
 from env.device import Device
-from agent.node import build_graph, llm_env_key
+from agent.anthropic_loop import load_prompt, run_anthropic
 
 
 def main(argv: list[str]) -> int:
     load_dotenv()
-    if not llm_env_key():
-        print("ERROR: no ANTHROPIC_API_KEY or OPENAI_API_KEY in .env", file=sys.stderr)
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ERROR: no ANTHROPIC_API_KEY in .env", file=sys.stderr)
         return 2
     if len(argv) < 2:
         print("usage: python -m agent.run \"<task>\"", file=sys.stderr)
@@ -20,9 +21,9 @@ def main(argv: list[str]) -> int:
 
     task = argv[1]
     device = Device()
-    # NOTE: pass a real `model_call` here that wraps the agentspan Agent node.
-    run = build_graph(device, max_steps=25)
-    traj = run(task)
+    system = load_prompt()
+    traj = run_anthropic(device, system, task, max_steps=25)
+
     for i, s in enumerate(traj.steps, 1):
         print(f"[{i}] {s.tool}({s.args}) -> {s.observation}")
     print(f"\nDONE success={traj.success} note={traj.note}")

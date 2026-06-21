@@ -35,7 +35,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from env.device import Device
-from agent.node import build_graph, Trajectory
+from agent.anthropic_loop import load_prompt, run_anthropic, Trajectory
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ def main() -> None:
 
     print("Connecting to device...")
     device = Device()
-    run = build_graph(device, max_steps=25)
+    system = load_prompt()
 
     print("Connected. Type a task and press Enter. Ctrl-C to quit.\n")
 
@@ -163,7 +163,7 @@ def main() -> None:
         traj = Trajectory(task=task)
 
         try:
-            traj = run(task)
+            traj = run_anthropic(device, system, task, max_steps=25)
         except KeyboardInterrupt:
             interrupted = True
             print("\n[interrupted]")

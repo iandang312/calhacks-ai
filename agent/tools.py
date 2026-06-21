@@ -193,13 +193,8 @@ def is_finish(tool_name: str) -> bool:
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
-        "name": "dump_ui",
-        "description": "Return the current UI hierarchy as XML. Call this before any coordinate-based action. Does NOT guarantee the foreground app has finished rendering its first frame.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-    {
         "name": "tap",
-        "description": "Tap at absolute pixel coordinates (x, y). Does NOT verify the tap landed on any element. Coordinates must come from the most recent dump_ui output.",
+        "description": "Tap at absolute pixel coordinates (x, y). Does NOT verify the tap landed on any element. Read coordinates from the most recent screenshot.",
         "parameters": {
             "type": "object",
             "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
@@ -346,7 +341,6 @@ def _h_finish(d: Device, success: bool, note: str) -> str:
 
 
 HANDLERS: dict[str, Callable[..., str]] = {
-    "dump_ui": _h_dump_ui,
     "tap": _h_tap,
     "tap_text": _h_tap_text,
     "long_press": _h_long_press,
