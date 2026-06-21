@@ -20,6 +20,8 @@ async def infer(req: InferRequest) -> InferResponse:
     if not text:
         raise HTTPException(status_code=400, detail="`text` must not be empty")
 
+    log.info("infer request: text=%r context=%r", text, req.context)
+
     try:
         plan = await infer_intent(text, req.context)
     except anthropic.APIStatusError as e:
@@ -33,4 +35,5 @@ async def infer(req: InferRequest) -> InferResponse:
         log.exception("Intent inference failed")
         raise HTTPException(status_code=500, detail=f"Inference failed: {e}")
 
+    log.info("infer response: plan=%r", plan)
     return InferResponse(plan=plan)
