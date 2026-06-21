@@ -1,0 +1,7 @@
+# Pin floors that include output_config structured outputs + the claude-opus-4-8 model.
+# Run `pip install -U -r requirements.txt` to pull the latest compatible releases.
+anthropic>=0.69.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+python-dotenv>=1.0.0
