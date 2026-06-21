@@ -1,6 +1,7 @@
 <resources>
-    <string name="app_name">Calhacks AI</string>
-    <string name="start">Start</string>
-    <string name="stop">Stop</string>
-    <string name="transcript_hint">Tap Start and speak…</string>
+    <string name="app_name">Daisy</string>
+    <string name="service_channel_name">Daisy assistant</string>
+    <string name="service_notification_title">Daisy is listening</string>
+    <string name="service_notification_text">Say Hi Daisy anytime</string>
+    <string name="accessibility_service_description">Daisy uses accessibility to open apps, tap buttons, and type on your behalf after you confirm each action.</string>
 </resources>

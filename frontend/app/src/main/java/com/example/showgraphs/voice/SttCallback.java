@@ -1,4 +1,4 @@
-package com.calhacks.ai.voice.stt;
+package com.example.showgraphs.voice;
 
 /**
  * Callbacks from {@link DeepgramSttClient}. All methods are invoked on
