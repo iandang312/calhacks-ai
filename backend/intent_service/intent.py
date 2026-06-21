@@ -54,25 +54,14 @@ explanation of why, no closing remarks.
 Base your plan on the inferred intent, not on the literal garbled words. Output the \
 plan text directly with nothing around it."""
 
-# One shared async client. Reads ANTHROPIC_API_KEY from the environment.
-_client = AsyncAnthropic()
-
-
 async def infer_intent(text: str, context: str | None = None) -> str:
-    """Infer the user's intent from a noisy STT transcript.
-
-    Returns a single first-person plan string — spoken to the user via TTS and fed
-    to the mobilerun UI framework. Raises on API/transport errors so the caller
-    (the FastAPI route) can map them to an HTTP status.
-    """
+    """Infer the user's intent from a noisy STT transcript."""
     user_content = text if not context else f"[Context: {context}]\n\n{text}"
 
-    response = await _client.messages.create(
+    response = await AsyncAnthropic().messages.create(
         model=MODEL,
         max_tokens=1024,
         system=SYSTEM_PROMPT,
-        thinking={"type": "adaptive"},
-        output_config={"effort": "low"},  # snappy responses for the voice loop
         messages=[{"role": "user", "content": user_content}],
     )
 
