@@ -1,253 +1,71 @@
-# daisy 🎙️
+# Daisy 🌼
 
-### Voice Intent Engine for People with Speech Disorders
+### An accessibility-first phone agent for blind and low-vision users
 
-> Siri understands your words. We understand *you* — even when the words don't come out right.
+> Screen readers tell you what's on screen. Daisy actually does the task — by voice, one request at a time.
 
 ![Deepgram](https://img.shields.io/badge/Deepgram-STT%2FTTS-blue)
-![Claude](https://img.shields.io/badge/Anthropic-Claude%20API-orange)
-![Agent S](https://img.shields.io/badge/Simular-Agent%20S-purple)
+![Claude](https://img.shields.io/badge/Anthropic-Claude-orange)
+![Android](https://img.shields.io/badge/Android-Accessibility%20Service-green)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-services-009688)
 
 ---
 
-## The Problem
+## Inspiration
 
-Most voice assistants are built for fluent, structured speech.
+Screen readers like TalkBack let blind and low-vision (BLV) users hear what's on
+screen, but operating an app still means swiping through it one element at a time.
+A single everyday task — ordering food, booking a ride, replying to a message,
+changing a setting — can take dozens of sequential swipes and taps. It's slow,
+fatiguing, and easy to lose track of.
 
-For many people with speech disorders, aphasia, stutters, or other communication-related conditions, speech can include repeated sounds, interrupted phrases, incomplete sentences, or unclear wording.
-
-For example:
-
-> "I w-w-wan-t a bur-bur-ger"
-
-A traditional assistant may struggle to understand this reliably.
-
-daisy is designed to recover the user's true intent from fragmented or disfluent speech and turn it into a clear, actionable plan.
-
----
-
-## Our Solution
-
-daisy is an accessibility-focused Android AI agent layer that listens after a wake word, reconstructs the user's intended request, explains the plan back to them, and then carries out the action inside a real Android app.
-
-Instead of forcing users to speak like machines, daisy adapts to how the user naturally communicates.
+Mainstream voice assistants don't fix this. They answer questions and fire off a
+few built-in commands, but they can't actually drive third-party apps. We wanted an
+assistant where a BLV user states a goal once, in plain language, and the agent does
+the navigating — narrating every step and confirming before anything important — so
+the user stays fully in control without needing to see the screen.
 
 ---
 
-## How It Works
+## What It Does
 
-1. The user says a wake word.
-2. daisy begins listening.
-3. Deepgram transcribes the user's speech.
-4. The transcript is redacted for personal information (PII).
-5. Claude interprets the transcript and reconstructs the user's true intent.
-6. daisy explains the interpreted intent and planned action back to the user.
-7. The user confirms the action.
-8. Simular Agent S and the Android Accessibility API execute the task inside a real Android app.
+Daisy is an accessibility-first Android agent that sits between a user's voice and
+their phone.
+
+After a wake word, the user says what they want. Daisy interprets the intent,
+explains its plan aloud, asks for confirmation, then uses Android automation to carry
+out the multi-step task inside a real app — describing what's on screen as it goes and
+pausing before any meaningful action.
+
+The core goal isn't just app automation. It's **independence**: letting BLV users
+complete multi-step mobile tasks by voice, without grinding through linear
+screen-reader navigation, and without ever losing visibility into what the agent is doing.
 
 ---
 
-## Example
+## How We Built It
 
-User says:
+Daisy combines speech, LLM reasoning, user memory, and Android app control:
 
-> "I w-w-wan-t a bur-bur-ger"
-
-daisy interprets:
-
-> "The user wants to order a burger."
-
-daisy responds:
-
-> "I think you want to order a burger. I will open the app, search for burger options, and ask you to confirm before placing anything."
-
-Then the Android agent begins executing the task.
+- **Deepgram** — speech-to-text and text-to-speech, powering the audio-first interface (the primary channel for our users).
+- **Claude** — interprets the user's goal, plans the multi-step task, and reasons over the current screen to decide the next action.
+- **Android Accessibility Service** — captures screen state (the same accessibility tree TalkBack uses) and performs taps, swipes, and text entry.
+- **Evaluation tooling** — tracks whether the agent completed the task the user actually intended.
 
 ---
 
 ## Architecture
 
-    Wake Word
-       ↓
-    Voice Input
-       ↓
-    Deepgram Speech-to-Text
-       ↓
-    PII Redaction (spaCy)
-       ↓
-    Claude Intent Reconstruction
-       ↓
-    Intent + Plan Generation
-       ↓
-    User Confirmation
-       ↓
-    Simular Agent S
-       ↓
-    Android Accessibility API
-       ↓
-    Real Android App Action
+Rather than one monolithic chatbot, Daisy splits the work across agents with
+genuinely distinct jobs — a divide-and-conquer design where each stage does one thing well:
 
----
-
-## Setup
-
-### 1. Create a virtual environment
-
-From the repo root:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate          # macOS / Linux
-# .venv\Scripts\activate           # Windows PowerShell
-```
-
-You should see `(.venv)` in your prompt. Every command below assumes the venv is active.
-
-### 2. Install packages
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-Verify:
-
-```bash
-python -c "import agentspan, uiautomator2, fastapi, dotenv; print('ok')"
-```
-
-### 3. Configure environment variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in the required keys (see `.env.example` for the full list).
-
-`.env` is gitignored.
-
-### 4. Download the spaCy NLP model (one-time)
-
-The PII protection service uses spaCy's large English model for named-entity recognition (person names, locations, organisations):
-
-```bash
-python -m spacy download en_core_web_lg
-```
-
-Verify:
-
-```bash
-python -c "import spacy; spacy.load('en_core_web_lg'); print('ok')"
-```
-
-### 5. Prepare the Android device (one-time per device)
-
-1. Launch an Android device/emulator (https://developer.android.com/studio).
-2. Confirm `adb` sees it:
-
-```bash
-adb devices
-```
-
-3. Push the on-device `atx-agent` that `uiautomator2` needs:
-
-```bash
-python -m uiautomator2 init
-```
-
-### 6. Start the agent server
-
-The agent runtime requires its server running locally. This script loads credentials from `.env` into the server's store and starts it:
-
-```bash
-# First time only — make the script executable
-chmod +x scripts/start_server.sh
-
-# Every time — run from the repo root in a dedicated terminal
-./scripts/start_server.sh
-```
-
-The server starts on `http://localhost:6767`. Keep this terminal open — the server must stay running whenever you use the agent or run LLM tests.
-
----
-
-## Run
-
-Three processes need to run in separate terminals. Open them in order:
-
-**Terminal 1 — agent server** (keep running):
-
-```bash
-source .venv/bin/activate
-./scripts/start_server.sh
-```
-
-**Terminal 2 — Python HTTP service** (for the Java side, keep running):
-
-```bash
-source .venv/bin/activate
-uvicorn agent.server:app --host 0.0.0.0 --port 8000
-```
-
-**Terminal 3 — send a task** (one-shot CLI or tests):
-
-```bash
-source .venv/bin/activate
-
-# Single task via CLI
-python -m agent.run "open the settings app"
-
-# Or POST to the HTTP service directly
-curl -X POST http://localhost:8000/agent/run \
-     -H "Content-Type: application/json" \
-     -d '{"task": "open the settings app"}'
-```
-
----
-
-## Test
-
-**Terminal 3** (agent server must be running in Terminal 1):
-
-Unit tests — no emulator, no LLM:
-
-```bash
-pytest tests/test_agent_loop.py -q
-```
-
-PII protection tests — no emulator, spaCy model required:
-
-```bash
-pytest tests/services/test_pii_redactor.py -v -s
-```
-
-LLM integration tests — agent server required:
-
-```bash
-RUN_LLM_TESTS=1 pytest tests/test_agentspan_node.py -v
-```
-
-Device integration tests — emulator required:
-
-```bash
-RUN_DEVICE_TESTS=1 pytest tests/test_actions.py -q
-```
-
----
-
-## Built With
-
-- **Python** — backend services and agent runtime
-- **Kotlin / Java** — Android app and accessibility integration
-- **Deepgram** — speech-to-text and text-to-speech
-- **Claude** — intent reconstruction from disfluent speech
-- **Simular Agent S** — app interaction planning and execution
-- **Android Accessibility Service / uiautomator2** — on-device screen reading and action execution
-- **spaCy** — PII redaction via named-entity recognition
-- **FastAPI** — Python HTTP service
-
----
-
-## Team
-
-Built at the UC Berkeley AI Hackathon 2026.
+```mermaid
+flowchart TD
+    Wake["🔔 Wake<br/>wake word + persistent listening cue"] --> Listen
+    Listen["🎙️ Listen & Transcribe<br/>Deepgram STT"] --> Planner
+    Planner["🧭 Planner (Claude)<br/>reconstruct intent → step-by-step roadmap"] --> Perceiver
+    Perceiver["👁️ Perceiver<br/>read screen via Accessibility tree"] --> Verifier
+    Verifier["🛡️ Verifier / Guard<br/>narrate, check success, gate risky steps"] --> Done{Task complete?}
+    Done -- "no" --> Perceiver
+    Done -- "yes" --> Eval["📊 Evaluation<br/>score intent + task success"]
