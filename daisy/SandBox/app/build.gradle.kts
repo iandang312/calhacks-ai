@@ -6,7 +6,7 @@ plugins {
 }
 
 // Keep build output off OneDrive to avoid Windows file-lock errors.
-val localBuildDir = File(System.getProperty("user.home"), ".cache/daisy-demo/app/build")
+val localBuildDir = File(System.getProperty("user.home"), ".cache/daisy-sandbox/app/build")
 layout.buildDirectory.set(localBuildDir)
 
 // Pull the Deepgram key out of local.properties (gitignored) and into BuildConfig,

@@ -21,13 +21,13 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Demo_App"
+rootProject.name = "SandBox"
 include(":app")
 
 gradle.beforeProject {
-    if (project.name == "Demo_App") {
+    if (project.name == "SandBox") {
         project.layout.buildDirectory.set(
-            File(System.getProperty("user.home"), ".cache/daisy-demo/root/build"),
+            File(System.getProperty("user.home"), ".cache/daisy-sandbox/root/build"),
         )
     }
 }
