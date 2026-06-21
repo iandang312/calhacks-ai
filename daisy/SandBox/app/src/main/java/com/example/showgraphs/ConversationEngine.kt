@@ -13,6 +13,20 @@ class ConversationEngine(
         fun hideOverlay()
         fun leaveApp()
         fun execute(command: ParsedCommand)
+
+        /**
+         * Send a speech transcript to the backend intent service. Exactly one of
+         * [onPlan] (the LLM's first-person plan) or [onError] (a user-facing
+         * message) is invoked on the main thread.
+         */
+        fun inferIntent(
+            transcript: String,
+            onPlan: (String) -> Unit,
+            onError: (String) -> Unit,
+        )
+
+        /** Cancel any in-flight intent request (the session is ending). */
+        fun cancelIntent()
     }
 
     private var phase = Phase.STANDBY
@@ -33,6 +47,13 @@ class ConversationEngine(
     // Caps the confirmation reprompt so an unclear yes/no can't loop forever.
     private var confirmRetries = 0
 
+    // While listening, finalized speech segments accumulate here instead of being
+    // sent one at a time. Deepgram finalizes a segment on every natural pause, so
+    // sending on the first one cuts off a still-in-progress instruction. We wait
+    // for COMMAND_DEBOUNCE_MS of quiet (no new segments) before sending the whole.
+    private val pendingTranscript = StringBuilder()
+    private val commandSendRunnable = Runnable { sendBufferedCommand() }
+
     private enum class Phase {
         STANDBY,
         GREETING,
@@ -52,7 +73,15 @@ class ConversationEngine(
         }
         when (phase) {
             Phase.GREETING, Phase.LISTENING, Phase.CONFIRMING -> {
-                if (CommandInterpreter.isGoodbye(text)) endSession()
+                if (CommandInterpreter.isGoodbye(text)) {
+                    endSession()
+                    return
+                }
+                // Interim words mean the user is still mid-instruction. Push the
+                // pending send back so we don't cut them off between segments.
+                if (phase == Phase.LISTENING && pendingTranscript.isNotEmpty()) {
+                    scheduleCommandSend()
+                }
             }
             Phase.STANDBY, Phase.EXECUTING -> Unit
         }
@@ -112,6 +141,8 @@ class ConversationEngine(
         pendingCommand = null
         confirmRetries = 0
         cancelInactivityTimeout()
+        cancelCommandSend()
+        callbacks.cancelIntent()
         phase = Phase.GREETING
         callbacks.showOverlay(DaisyState.AWAKE)
         Log.i("DAISY_WAKE", "WAKE")
@@ -128,19 +159,66 @@ class ConversationEngine(
             return
         }
 
-        val parsed = CommandInterpreter.parse(text)
-        // Be patient: if we can't map the speech to an action yet, just keep
-        // listening silently instead of repeatedly saying we didn't understand.
-        if (parsed.action == AgentAction.UNKNOWN) {
-            Log.i(TAG, "no actionable command in: $text — staying patient")
-            // The user spoke, just not something we could map. Reset the silence
-            // timer so we keep listening, but don't stay open indefinitely.
-            armInactivityTimeout()
-            return
-        }
+        // Accumulate this finalized segment and wait for a pause before sending,
+        // so a mid-sentence breath doesn't ship a half-finished instruction. The
+        // assembled transcript goes to the backend once the user truly stops.
+        if (pendingTranscript.isNotEmpty()) pendingTranscript.append(' ')
+        pendingTranscript.append(text)
+        Log.i(TAG, "buffering command: $pendingTranscript")
+        cancelInactivityTimeout()
+        scheduleCommandSend()
+    }
 
-        // Act on the command directly — no "should I do that?" confirmation step.
-        executeNow(parsed)
+    private fun scheduleCommandSend() {
+        handler.removeCallbacks(commandSendRunnable)
+        handler.postDelayed(commandSendRunnable, COMMAND_DEBOUNCE_MS)
+    }
+
+    private fun cancelCommandSend() {
+        handler.removeCallbacks(commandSendRunnable)
+        pendingTranscript.setLength(0)
+    }
+
+    private fun sendBufferedCommand() {
+        // Only fire if we're still gathering a command; a wake/goodbye/teardown
+        // in the debounce window moves us out of LISTENING and cancels this.
+        if (phase != Phase.LISTENING) return
+        val text = pendingTranscript.toString().trim()
+        pendingTranscript.setLength(0)
+        if (text.isEmpty()) return
+        // Hand the raw transcript to the backend LLM. It infers intent from noisy
+        // speech and returns a first-person plan, which we speak back. No local
+        // command parsing — the model owns interpretation now.
+        sendToIntentService(text)
+    }
+
+    private fun sendToIntentService(text: String) {
+        cancelInactivityTimeout()
+        phase = Phase.EXECUTING
+        callbacks.showOverlay(DaisyState.PROCESSING)
+        callbacks.inferIntent(
+            transcript = text,
+            onPlan = { plan -> onPlanReceived(plan) },
+            onError = { message -> onIntentError(message) },
+        )
+    }
+
+    private fun onPlanReceived(plan: String) {
+        // Drop a late response if the session moved on (ended, or re-woken) while
+        // the request was in flight.
+        if (phase != Phase.EXECUTING) return
+        callbacks.speak(plan) { returnToListening() }
+    }
+
+    private fun onIntentError(message: String) {
+        if (phase != Phase.EXECUTING) return
+        callbacks.speak(message) { returnToListening() }
+    }
+
+    private fun returnToListening() {
+        phase = Phase.LISTENING
+        callbacks.showOverlay(DaisyState.LISTENING)
+        armInactivityTimeout()
     }
 
     private fun onConfirmation(text: String) {
@@ -189,6 +267,8 @@ class ConversationEngine(
         pendingCommand = null
         confirmRetries = 0
         cancelInactivityTimeout()
+        cancelCommandSend()
+        callbacks.cancelIntent()
         phase = Phase.STANDBY
         wakeBuffer.setLength(0)
         lastWakeInputAt = 0L
@@ -243,5 +323,13 @@ class ConversationEngine(
 
         /** Give up the confirmation reprompt after this many unclear replies. */
         private const val MAX_CONFIRM_RETRIES = 2
+
+        /**
+         * How long to wait for the user to keep talking before sending the
+         * assembled instruction. Each new speech segment resets this, so the send
+         * only fires once they've paused for this long. Raise it if instructions
+         * still get cut off; lower it if Daisy feels sluggish to respond.
+         */
+        private const val COMMAND_DEBOUNCE_MS = 2000L
     }
 }

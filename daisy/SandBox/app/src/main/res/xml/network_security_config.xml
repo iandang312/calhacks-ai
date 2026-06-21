@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+        Dev only: the backend intent service runs as plain HTTP on the host
+        machine, reachable from the emulator at 10.0.2.2 (and localhost on a
+        device with adb reverse). Cleartext is permitted only for these hosts;
+        every other domain still requires HTTPS.
+    -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>
